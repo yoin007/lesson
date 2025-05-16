@@ -1,0 +1,49 @@
+#-------------------系统配置-------------------
+wcf_http_url: http://ip:port/
+admin: admin # 管理员wxid, 撤回的消息会转发给管理员, 与下方的admin_list有重复，可以自己精简掉
+wcf_admin: admin # wcf_http_api 登陆的账号
+wcf_pwd: pwd # wcf_http_api 登陆的密码
+admin_list: # 管理员列表
+ - admin
+ - wxid
+queue_timer: 3 # 消息队列固定等待时长
+queue_timer_random: # 消息队列随机等待时长
+ - 1
+ - 4
+admin_chatroom: # 管理的群聊
+ - aa@chatroom
+gk_remind: # 高考倒计时发送的群聊
+ - 55@chatroom
+
+#-------------------函数配置-------------------
+auto_new_friend: True
+new_friend_tips: '您好，我已经通过了您的好友请求，请将您的姓名告知，以便联系。'
+#-------------------apikey配置-------------------
+joke_key: aa
+weather_key: aa
+zhipu_key: aa
+deepseek_key: aa
+#-------------------function配置-------------------
+#-------------------lesson配置
+lesson_admin: # 教务系统管理员列表
+ - admin
+lesson_dir: C:\Users\administrator\Desktop\lesson # lenson根目录
+
+datashow_info: "课表已更新" # 提示语
+
+park_admin: # 停车监控系统管理员（自用，可以删掉）
+ - admin
+
+park_db: # 停车监控系统数据库配置
+  host: 'ip'
+  user: 'admin'
+  password: 'pwd'
+  database: 'db'
+
+invite_rooms: # 根据关键词邀请至不同的群聊
+ assistant: 5@chatroom
+
+zhaosheng: # 腾讯元器（招生助理，自用，可以删除）
+ token: your-token
+ assistant_id: your-id
+ user_id: bot
