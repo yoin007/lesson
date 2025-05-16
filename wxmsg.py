@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from types import SimpleNamespace
 import re  # 添加缺失的导入
-
+import sqlite3
 
 def dict_to_obj(d):
     """将字典转换为对象，处理嵌套的情况"""
@@ -55,8 +55,9 @@ class WxMsg():
         self.create_time = getattr(msg, "createTime", 0)
         self.ext = getattr(msg, "ext", "")
         self.thumb = ""
+        self.is_at = self._is_at()
         self.parse_content()
-    
+        
     def parse_content(self):
         """解析消息内容"""
         content = self.content
@@ -170,6 +171,7 @@ class WxMsg():
 
     def __to_dict__(self):
         return {
+            'wxid': self.wxid,
             'is_self': self.is_self,
             'is_group': self.is_group,
             'type': self.type,
@@ -180,15 +182,20 @@ class WxMsg():
             'content': self.content,
             'thumb': self.thumb,
             'ext': self.ext,
+            'is_at': self._is_at(),
         }
 
     def __str__(self) -> str:
-        s = "+"*19 + "\n"
+        # TODO: 根据联系人信息，显示联系人/群聊名称
+        s = ""
+        if self.is_self:
+            s += f"### 发送消息 {self.msg_id} ###\n"
+        else:
+            s += f"### 收到消息 {self.msg_id} ###\n"
         if self.is_group:
             s += f"群聊消息：{self.roomid}\n"
         else:
             s += f"单聊消息\n"
-        s += f"{'自己发的:' if self.is_self else ''}"
         # 将毫秒时间戳转换为秒
         timestamp_seconds = self.create_time / 1000
         s += f"{self.sender} | {self.msg_id} | {datetime.fromtimestamp(timestamp_seconds)} | {self.type}"
@@ -197,17 +204,9 @@ class WxMsg():
         s += f"\next: {self.ext}" if self.ext else ""
         return s
 
-    def from_self(self) -> bool:
-        """是否自己发的消息"""
-        return self.is_self
-
-    def from_group(self) -> bool:
-        """是否群聊消息"""
-        return self.is_group
-
-    def is_at(self, wxid) -> bool:
+    def _is_at(self) -> bool:
         """是否被 @：群消息，在 @ 名单里，并且不是 @ 所有人"""
-        if not self.from_group():
+        if not self.is_group:
             return False  # 只有群消息才能 @
 
         if not self.wxid in self.ext:
@@ -218,11 +217,50 @@ class WxMsg():
 
         return True
 
-    def is_text(self) -> bool:
-        """是否文本消息"""
-        return self.type == 1
+class MessageDB():
+    """消息数据库"""
+    def __enter__(self, db = 'databases/messages.db'):
+        self.__conn__ = sqlite3.connect(db)
+        self.__cursor__ = self.__conn__.cursor()
+        return self
+
+    def __exit__(self, exc_type=None, exc_val=None, exc_tb=None):
+        self.__conn__.commit()
+        self.__conn__.close()
+
+    def __create_table__(self):
+        self.__cursor__.execute('''
+            CREATE TABLE IF NOT EXISTS messages(
+            id INTEGER PRIMARY KEY autoincrement,
+            wxid TEXT,
+            msg_id TEXT,
+            type INTEGER,
+            sender TEXT,
+            roomid TEXT,
+            content TEXT,
+            thumb TEXT,
+            ext TEXT,
+            is_at BOOLEAN,
+            is_self BOOLEAN,
+            is_group BOOLEAN,
+            create_time INTEGER)''')
+        self.__conn__.commit()
+
+    def insert(self, msg):
+        self.__cursor__.execute('''
+            INSERT INTO messages(wxid, msg_id, type, sender, roomid, content, thumb, ext, is_at, is_self, is_group, create_time)
+            VALUES(:wxid, :msg_id, :type, :sender, :roomid, :content, :thumb, :ext, :is_at, :is_self, :is_group, :create_time)''', msg)
+        self.__conn__.commit()
+    
+    def select(self, msg_id):
+        self.__cursor__.execute('''
+            SELECT * FROM messages WHERE msg_id = :msg_id''', {'msg_id': msg_id})
+        result =  self.__cursor__.fetchone()
+        return result if result else None
+        
 
 if __name__ == "__main__":
-    msg = {'id': None, 'wechatid': 'wxid_3hio95ow9yh122', 'friendid': '56050207237@chatroom', 'msgsvrid': '4657847627768651992', 'issend': 'true', 'contenttype': 2, 'content': 'wxid_3hio95ow9yh122:{"Thumb":"http://b1.wcr222.top/0e2c4df62a691f11/2025/05/14/41658fc8b63e4172a4f10be967244210.jpg","Md5":""}', 'ext': '', 'type': 1, 'createTime': 1747209561316, 'owner': None, 'userContent': None}  
-    wx_msg = WxMsg(msg).__to_dict__()
-    print(wx_msg)
+    m = MessageDB()
+    m.__enter__()
+    m.__create_table__()
+    m.__exit__()
