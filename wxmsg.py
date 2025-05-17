@@ -4,12 +4,13 @@ from types import SimpleNamespace
 import re  # 添加缺失的导入
 import sqlite3
 
+
 def dict_to_obj(d):
     """将字典转换为对象，处理嵌套的情况"""
     for k, v in d.items():
         if isinstance(v, dict):
             d[k] = dict_to_obj(v)
-        elif isinstance(v, str) and v.startswith('{') and v.endswith('}'):
+        elif isinstance(v, str) and v.startswith("{") and v.endswith("}"):
             # 尝试解析可能是JSON的字符串
             try:
                 json_obj = json.loads(v)
@@ -19,11 +20,13 @@ def dict_to_obj(d):
                 pass  # 如果不是有效的JSON，保持原样
     return SimpleNamespace(**d)
 
+
 def filter_msg(msg):
     msg = dict_to_obj(msg)
     return msg
 
-class WxMsg():
+
+class WxMsg:
     """微信消息
     Attributes:
         id (str): primary key
@@ -43,12 +46,12 @@ class WxMsg():
         if isinstance(msg, dict):
             msg = filter_msg(msg)
         self.formate_msg(msg)
-    
+
     def formate_msg(self, msg):
         self.wxid = getattr(msg, "wechatid", "")
         self.roomid = getattr(msg, "friendid", "")
-        self.is_self = True if getattr(msg, "issend", 'false') == 'true' else False
-        self.is_group = 1 if '@chatroom' in self.roomid else 0
+        self.is_self = True if getattr(msg, "issend", "false") == "true" else False
+        self.is_group = 1 if "@chatroom" in self.roomid else 0
         self.content = getattr(msg, "content", "")
         self.type = getattr(msg, "contenttype", 0)
         self.msg_id = getattr(msg, "msgsvrid", "")
@@ -57,14 +60,14 @@ class WxMsg():
         self.thumb = ""
         self.is_at = self._is_at()
         self.parse_content()
-        
+
     def parse_content(self):
         """解析消息内容"""
         content = self.content
         if isinstance(content, str):
-            if ':' in content and '{' in content:
-                parts = content.split(':', 1)
-                if len(parts) > 1 and '{' in parts[1]:
+            if ":" in content and "{" in content:
+                parts = content.split(":", 1)
+                if len(parts) > 1 and "{" in parts[1]:
                     self.sender = parts[0]
                     try:
                         json_content = json.loads(parts[1])
@@ -74,27 +77,49 @@ class WxMsg():
                         self.content = content
                         self.thumb = ""
             else:
-                self.sender = self.roomid if not self.is_group else content.split(':\n')[0] if ':\n' in content else ""
-                self.content = content if not self.is_group else content.split(':\n')[1] if ':\n' in content else content
+                self.sender = (
+                    self.roomid
+                    if not self.is_group
+                    else content.split(":\n")[0] if ":\n" in content else ""
+                )
+                self.content = (
+                    content
+                    if not self.is_group
+                    else content.split(":\n")[1] if ":\n" in content else content
+                )
                 self.thumb = ""
         else:
             # 如果content已经是对象，直接使用
             self.sender = self.roomid
-            
+
         match self.type:
             case 2:
                 self.ext = self.content
                 self.content = f"[图片]"
                 self.thumb = self.ext.Thumb
             case 3:
-                self.sender = self.roomid if not self.is_group else content.split(':http')[0] if ':http' in content else ""
-                self.ext = content if not self.is_group else 'http'+ content.split(':http')[1] if ':http' in content else content
-                self.content = '[语音消息]'
+                self.sender = (
+                    self.roomid
+                    if not self.is_group
+                    else content.split(":http")[0] if ":http" in content else ""
+                )
+                self.ext = (
+                    content
+                    if not self.is_group
+                    else (
+                        "http" + content.split(":http")[1]
+                        if ":http" in content
+                        else content
+                    )
+                )
+                self.content = "[语音消息]"
             case 5:
-                self.content = f'[系统消息] {self.content}'
+                self.content = f"[系统消息] {self.content}"
             case 6:
                 self.ext = self.content
-                self.content = f"[链接消息] {self.ext.Title} {self.ext.TypeStr} {self.ext.Source}"
+                self.content = (
+                    f"[链接消息] {self.ext.Title} {self.ext.TypeStr} {self.ext.Source}"
+                )
             case 8:
                 self.ext = self.content
                 self.content = f"[文件] {self.ext.Title}"
@@ -109,14 +134,16 @@ class WxMsg():
                 self.content = f"[红包] {self.ext.Title}"
             case 12:
                 self.ext = self.content
-                self.content = f"[转账{self.ext.PaySubType}] {self.ext.Title} {self.ext.Feedesc}"
+                self.content = (
+                    f"[转账{self.ext.PaySubType}] {self.ext.Title} {self.ext.Feedesc}"
+                )
             case 13:
                 self.ext = self.content
                 self.content = f"[小程序] | {self.ext.Source} | {self.ext.Title}"
                 self.thumb = self.ext.Thumb
             case 14:
                 self.ext = self.content
-                self.content = '[微信表情]'
+                self.content = "[微信表情]"
             case 15:
                 self.ext = self.content
                 self.content = f"[群管理消息]"
@@ -171,18 +198,18 @@ class WxMsg():
 
     def __to_dict__(self):
         return {
-            'wxid': self.wxid,
-            'is_self': self.is_self,
-            'is_group': self.is_group,
-            'type': self.type,
-            'msg_id': self.msg_id,
-            'create_time': self.create_time,
-            'sender': self.sender,
-            'roomid': self.roomid,
-            'content': self.content,
-            'thumb': self.thumb,
-            'ext': self.ext,
-            'is_at': self._is_at(),
+            "wxid": self.wxid,
+            "is_self": self.is_self,
+            "is_group": self.is_group,
+            "type": self.type,
+            "msg_id": self.msg_id,
+            "create_time": self.create_time,
+            "sender": self.sender,
+            "roomid": self.roomid,
+            "content": self.content,
+            "thumb": self.thumb,
+            "ext": self.ext,
+            "is_at": self._is_at(),
         }
 
     def __str__(self) -> str:
@@ -217,9 +244,11 @@ class WxMsg():
 
         return True
 
-class MessageDB():
+
+class MessageDB:
     """消息数据库"""
-    def __enter__(self, db = 'databases/messages.db'):
+
+    def __enter__(self, db="databases/messages.db"):
         self.__conn__ = sqlite3.connect(db)
         self.__cursor__ = self.__conn__.cursor()
         return self
@@ -229,7 +258,8 @@ class MessageDB():
         self.__conn__.close()
 
     def __create_table__(self):
-        self.__cursor__.execute('''
+        self.__cursor__.execute(
+            """
             CREATE TABLE IF NOT EXISTS messages(
             id INTEGER PRIMARY KEY autoincrement,
             wxid TEXT,
@@ -243,21 +273,28 @@ class MessageDB():
             is_at BOOLEAN,
             is_self BOOLEAN,
             is_group BOOLEAN,
-            create_time INTEGER)''')
+            create_time INTEGER)"""
+        )
         self.__conn__.commit()
 
     def insert(self, msg):
-        self.__cursor__.execute('''
+        self.__cursor__.execute(
+            """
             INSERT INTO messages(wxid, msg_id, type, sender, roomid, content, thumb, ext, is_at, is_self, is_group, create_time)
-            VALUES(:wxid, :msg_id, :type, :sender, :roomid, :content, :thumb, :ext, :is_at, :is_self, :is_group, :create_time)''', msg)
+            VALUES(:wxid, :msg_id, :type, :sender, :roomid, :content, :thumb, :ext, :is_at, :is_self, :is_group, :create_time)""",
+            msg,
+        )
         self.__conn__.commit()
-    
+
     def select(self, msg_id):
-        self.__cursor__.execute('''
-            SELECT * FROM messages WHERE msg_id = :msg_id''', {'msg_id': msg_id})
-        result =  self.__cursor__.fetchone()
+        self.__cursor__.execute(
+            """
+            SELECT * FROM messages WHERE msg_id = :msg_id""",
+            {"msg_id": msg_id},
+        )
+        result = self.__cursor__.fetchone()
         return result if result else None
-        
+
 
 if __name__ == "__main__":
     m = MessageDB()
