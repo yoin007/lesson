@@ -212,7 +212,7 @@ if __name__ == "__main__":
     # r = c.send_rich_text(des="❗戳我看看今天吃啥👉", thumb="http://b0.wcr222.top/2024/06/29/62b8d90380a449919e90d235d6109586.png", title="外卖红包天天领🧧", url="https://my-bucket-8ynxqsg-1305062151.cos-website.ap-guangzhou.myqcloud.com/uviewui/waimai668.html", receiver="yoin007")
     # r = c.down_file("9098001182538937472")
     r = c.send_image(
-        "http://b1.wcr222.top/0e2c4df62a691f11/2025/05/14/41658fc8b63e4172a4f10be967244210.jpg",
+        "http://10.0.0.1:14600/static/temp/yoin007.png",
         "yoin007",
     )
     print(r)

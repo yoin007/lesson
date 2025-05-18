@@ -64,31 +64,32 @@ class QueueDB:
         self._local.cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS queues (
-                id TEXT,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 is_consumed BOOLEAN DEFAULT 0,
+                msg_id TEXT,
                 data TEXT,
                 producer TEXT,
                 p_time TEXT,
                 consumer TEXT,
                 c_time TEXT,
-                timestamp INTEGER                          
+                timestamp INTEGER        
                 )"""
         )
         self._local.connection.commit()
 
-    def __produce__(self, m_id: str, data: dict, consumer: str, producer: str):
+    def __produce__(self, data: dict, consumer: str, producer: str, msg_id: str = ""):
         """
         生产消息队列
-        :param m_id: 消息id
+        :param msg_id: 对应微信消息的msg_id
         :param data: 消息内容
         :param producer: 消息生产者
-        :param consumer: 消息消费者,api的完整地址 eg: http://127.0.0.1:9999/text
+        :param consumer: 消息消费者,api
         :return:
         """
         data_string = json.dumps(data, ensure_ascii=False)
 
         record = {
-            "id": m_id,
+            "msg_id": msg_id,
             "data": data_string,
             "producer": producer,
             "p_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
@@ -99,7 +100,7 @@ class QueueDB:
         try:
             self._local.cursor.execute(
                 """
-            INSERT INTO queues (id, data, producer, p_time, consumer, c_time, timestamp) VALUES (:id, :data, :producer, :p_time, :consumer, :c_time, :timestamp)
+            INSERT INTO queues (msg_id, data, producer, p_time, consumer, c_time, timestamp) VALUES (:msg_id, :data, :producer, :p_time, :consumer, :c_time, :timestamp)
             """,
                 record,
             )
@@ -132,14 +133,16 @@ class QueueDB:
                         "Authorization": f"Bearer {token}",
                     }
                     r = requests.post(
-                        url=record[5],
-                        data=json.loads(record[2]),
+                        url=record[6],
+                        data=json.loads(record[3]),
                         headers=headers,
                         timeout=30,
                     )
-                    response.raise_for_status()  # 如果响应状态码指示错误，将抛出HTTPError异常
+                    r.raise_for_status()  # 修改这里：使用r而不是response
                     if r.status_code != 200:
-                        log.error(f"发送消息失败: {response.content.decode('utf-8')}")
+                        log.error(
+                            f"发送消息失败: {r.content.decode('utf-8')}"
+                        )  # 修改这里：使用r而不是response
                         return -1
                     # print(r.status_code, url)
                     c_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -150,14 +153,13 @@ class QueueDB:
                         (c_time, record[0]),
                     )
                     conn.commit()
-                    return response.content.decode("utf-8")
+                    return r.content.decode("utf-8")  # 修改这里：使用r而不是response
             except Exception as e:
                 log.error(f'消费消息队列失败: {e}-{record[5] if record else ""}')
                 return None
 
     def send_text(
         self,
-        m_id: str,
         msg: str,
         receiver: str,
         aters: str = "",
@@ -165,31 +167,24 @@ class QueueDB:
     ):
         data = {
             "friend_id": receiver,
-            "message": content,
+            "message": msg,
             "remark": aters,
             "content_type": 1,
         }
-        self.__produce__(m_id, data, base_url + "send_message_250514.html", producer)
+        self.__produce__(data, base_url + "send_message_250514.html", producer)
 
-    def send_image(
-        self, m_id: str, img_path: str, receiver: str, producer: str = "main"
-    ):
+    def send_image(self, img_path: str, receiver: str, producer: str = "main"):
         try:
             data = {"friend_id": receiver, "message": img_path, "content_type": 2}
-            self.__produce__(
-                m_id, data, base_url + "send_message_250514.html", producer
-            )
+            self.__produce__(data, base_url + "send_message_250514.html", producer)
         except Exception as e:
             self.send_text(m_id, f"{img_path}图片发送失败", receiver)
 
-    def send_file(
-        self, m_id: str, file_content: str, receiver: str, producer: str = "main"
-    ):
+    def send_file(self, file_content: str, receiver: str, producer: str = "main"):
         pass
 
     def send_rich_text(
         self,
-        m_id: str,
         des: str,
         thumb: str,
         title: str,
@@ -204,7 +199,7 @@ class QueueDB:
             ),
             "content_type": 6,
         }
-        self.__produce__(m_id, data, base_url + "send_message_250514.html", producer)
+        self.__produce__(data, base_url + "send_message_250514.html", producer)
 
 
 if __name__ == "__main__":

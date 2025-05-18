@@ -7,23 +7,38 @@ import sqlite3
 
 def dict_to_obj(d):
     """将字典转换为对象，处理嵌套的情况"""
+    if not isinstance(d, dict):
+        return d
+
     for k, v in d.items():
         if isinstance(v, dict):
             d[k] = dict_to_obj(v)
-        elif isinstance(v, str) and v.startswith("{") and v.endswith("}"):
+        elif (
+            isinstance(v, str)
+            and v
+            and v.strip().startswith("{")
+            and v.strip().endswith("}")
+        ):
             # 尝试解析可能是JSON的字符串
             try:
                 json_obj = json.loads(v)
                 if isinstance(json_obj, dict):
                     d[k] = dict_to_obj(json_obj)
-            except:
-                pass  # 如果不是有效的JSON，保持原样
+            except json.JSONDecodeError:
+                # 记录详细错误信息但保持原始值不变
+                pass
     return SimpleNamespace(**d)
 
 
 def filter_msg(msg):
-    msg = dict_to_obj(msg)
-    return msg
+    if not msg:
+        return None
+    try:
+        msg = dict_to_obj(msg)
+        return msg
+    except Exception as e:
+        print(f"处理消息失败: {e}")
+        return None
 
 
 class WxMsg:
@@ -208,7 +223,7 @@ class WxMsg:
             "roomid": self.roomid,
             "content": self.content,
             "thumb": self.thumb,
-            "ext": self.ext,
+            "ext": str(self.ext),
             "is_at": self._is_at(),
         }
 
