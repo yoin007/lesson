@@ -205,14 +205,19 @@ class Client:
                 return ""
             elif res.get("message") == "文件已下载":
                 return res.get("url")
+    
+    def contact_info(self):
+        """type：0通讯录 1群聊"""
+        token = self._check_token()
 
 
 if __name__ == "__main__":
+    static_url = Config().get_config('static_url')
     c = Client()
     # r = c.send_rich_text(des="❗戳我看看今天吃啥👉", thumb="http://b0.wcr222.top/2024/06/29/62b8d90380a449919e90d235d6109586.png", title="外卖红包天天领🧧", url="https://my-bucket-8ynxqsg-1305062151.cos-website.ap-guangzhou.myqcloud.com/uviewui/waimai668.html", receiver="yoin007")
     # r = c.down_file("9098001182538937472")
     r = c.send_image(
-        "http://10.0.0.1:14600/static/temp/yoin007.png",
+        static_url + "temp/yoin007.png",
         "yoin007",
     )
     print(r)

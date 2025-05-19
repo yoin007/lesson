@@ -1,18 +1,17 @@
 import json
 from datetime import datetime
-from types import SimpleNamespace
-import re  # 添加缺失的导入
+import re
 import sqlite3
 
 
-def dict_to_obj(d):
-    """将字典转换为对象，处理嵌套的情况"""
+def process_nested_dict(d):
+    """处理嵌套的字典，尝试解析可能是JSON的字符串"""
     if not isinstance(d, dict):
         return d
 
     for k, v in d.items():
         if isinstance(v, dict):
-            d[k] = dict_to_obj(v)
+            d[k] = process_nested_dict(v)
         elif (
             isinstance(v, str)
             and v
@@ -23,18 +22,19 @@ def dict_to_obj(d):
             try:
                 json_obj = json.loads(v)
                 if isinstance(json_obj, dict):
-                    d[k] = dict_to_obj(json_obj)
+                    d[k] = process_nested_dict(json_obj)
             except json.JSONDecodeError:
                 # 记录详细错误信息但保持原始值不变
                 pass
-    return SimpleNamespace(**d)
+    return d
 
 
 def filter_msg(msg):
     if not msg:
         return None
     try:
-        msg = dict_to_obj(msg)
+        if isinstance(msg, dict):
+            return process_nested_dict(msg)
         return msg
     except Exception as e:
         print(f"处理消息失败: {e}")
@@ -57,21 +57,35 @@ class WxMsg:
     """
 
     def __init__(self, msg) -> None:
-        # 确保输入是对象而不是字典
+        # 确保输入是处理过的字典
         if isinstance(msg, dict):
             msg = filter_msg(msg)
         self.formate_msg(msg)
 
     def formate_msg(self, msg):
-        self.wxid = getattr(msg, "wechatid", "")
-        self.roomid = getattr(msg, "friendid", "")
-        self.is_self = True if getattr(msg, "issend", "false") == "true" else False
-        self.is_group = 1 if "@chatroom" in self.roomid else 0
-        self.content = getattr(msg, "content", "")
-        self.type = getattr(msg, "contenttype", 0)
-        self.msg_id = getattr(msg, "msgsvrid", "")
-        self.create_time = getattr(msg, "createTime", 0)
-        self.ext = getattr(msg, "ext", "")
+        # 使用字典的get方法替代getattr
+        if isinstance(msg, dict):
+            self.wxid = msg.get("wechatid", "")
+            self.roomid = msg.get("friendid", "")
+            self.is_self = True if msg.get("issend", "false") == "true" else False
+            self.is_group = 1 if "@chatroom" in self.roomid else 0
+            self.content = msg.get("content", "")
+            self.type = msg.get("contenttype", 0)
+            self.msg_id = msg.get("msgsvrid", "")
+            self.create_time = msg.get("createTime", 0)
+            self.ext = msg.get("ext", "")
+        else:
+            # 如果不是字典，尝试使用属性访问（兼容旧代码）
+            self.wxid = getattr(msg, "wechatid", "")
+            self.roomid = getattr(msg, "friendid", "")
+            self.is_self = True if getattr(msg, "issend", "false") == "true" else False
+            self.is_group = 1 if "@chatroom" in self.roomid else 0
+            self.content = getattr(msg, "content", "")
+            self.type = getattr(msg, "contenttype", 0)
+            self.msg_id = getattr(msg, "msgsvrid", "")
+            self.create_time = getattr(msg, "createTime", 0)
+            self.ext = getattr(msg, "ext", "")
+        
         self.thumb = ""
         self.is_at = self._is_at()
         self.parse_content()
@@ -86,7 +100,7 @@ class WxMsg:
                     self.sender = parts[0]
                     try:
                         json_content = json.loads(parts[1])
-                        self.content = dict_to_obj(json_content)
+                        self.content = process_nested_dict(json_content)
                         self.thumb = json_content.get("Thumb", "")
                     except:
                         self.content = content
@@ -104,112 +118,313 @@ class WxMsg:
                 )
                 self.thumb = ""
         else:
-            # 如果content已经是对象，直接使用
+            # 如果content已经是字典，直接使用
             self.sender = self.roomid
 
-        match self.type:
-            case 2:
-                self.ext = self.content
-                self.content = f"[图片]"
-                self.thumb = self.ext.Thumb
-            case 3:
-                self.sender = (
-                    self.roomid
-                    if not self.is_group
-                    else content.split(":http")[0] if ":http" in content else ""
+        # 根据消息类型处理内容
+        self._process_by_type()
+
+    def _process_by_type(self):
+        """根据消息类型处理内容"""
+        content = self.content
+        
+        # 处理不同类型的消息
+        if self.type == 2:
+            self.ext = self.content
+            self.content = "[图片]"
+            # 处理ext可能是字典的情况
+            if isinstance(self.ext, dict) and "Thumb" in self.ext:
+                self.thumb = self.ext["Thumb"]
+            else:
+                try:
+                    self.thumb = self.ext.Thumb  # 兼容旧代码
+                except (AttributeError, TypeError):
+                    self.thumb = ""
+        elif self.type == 3:
+            self.sender = (
+                self.roomid
+                if not self.is_group
+                else content.split(":http")[0] if isinstance(content, str) and ":http" in content else ""
+            )
+            self.ext = (
+                content
+                if not self.is_group
+                else (
+                    "http" + content.split(":http")[1]
+                    if isinstance(content, str) and ":http" in content
+                    else content
                 )
-                self.ext = (
-                    content
-                    if not self.is_group
-                    else (
-                        "http" + content.split(":http")[1]
-                        if ":http" in content
-                        else content
-                    )
-                )
-                self.content = "[语音消息]"
-            case 5:
-                self.content = f"[系统消息] {self.content}"
-            case 6:
-                self.ext = self.content
-                self.content = (
-                    f"[链接消息] {self.ext.Title} {self.ext.TypeStr} {self.ext.Source}"
-                )
-            case 8:
-                self.ext = self.content
-                self.content = f"[文件] {self.ext.Title}"
-            case 9:
-                self.ext = self.content
-                self.content = f"[名片] {self.ext.Nickname}"
-            case 10:
-                self.ext = self.content
-                self.content = f"[位置] {self.ext.Title}"
-            case 11:
-                self.ext = self.content
-                self.content = f"[红包] {self.ext.Title}"
-            case 12:
-                self.ext = self.content
-                self.content = (
-                    f"[转账{self.ext.PaySubType}] {self.ext.Title} {self.ext.Feedesc}"
-                )
-            case 13:
-                self.ext = self.content
-                self.content = f"[小程序] | {self.ext.Source} | {self.ext.Title}"
-                self.thumb = self.ext.Thumb
-            case 14:
-                self.ext = self.content
-                self.content = "[微信表情]"
-            case 15:
-                self.ext = self.content
-                self.content = f"[群管理消息]"
-            case 16:
-                self.ext = self.content
-                self.content = f"[领取红包消息] {self.ext.Title}"
-            case 17:
-                self.ext = self.content
-                self.content = f"[群聊系统消息] {self.ext.title}"
-                self.sender = self.ext.user
-            case 18:
-                self.ext = self.content
-                self.content = f"[公众号文章] {self.ext.Title}"
-            case 19:
-                self.ext = self.content
-                self.content = f"[语音通话]"
-            case 20:
-                self.ext = self.content
-                self.content = f"[视频通话]"
-            case 21:
-                self.ext = self.content
-                self.content = f"[服务通知] {self.ext.title}"
-            case 22:
-                self.ext = self.content
-                self.content = f"{self.ext.title} \n [引用消息] {self.ext.displayName}: {self.ext.content}"
-            case 23:
-                self.ext = self.content
-                self.content = f"[群接龙]"
-            case 24:
-                self.ext = self.content
-                self.content = f"[视频号消息] {self.ext.des}"
-            case 25:
-                self.ext = self.content
-                self.content = f"[群直播消息] {self.ext.Title}"
-            case 26:
-                self.content = f"[拍一拍] {self.content}"
-            case 27:
-                self.ext = self.content
-                self.content = f"[分享音乐]"
-            case 28:
-                self.ext = self.content
-                self.content = f"[视频号直播]"
-            case 29:
-                self.ext = self.content
-                self.content = f"[客服号名片] {self.ext.Title}"
-            case 30:
-                self.ext = self.content
-                self.content = f"[企业微信名片] {self.ext.Title}"
-            case 99:
-                self.ext = self.content
-                self.content = f"[不支持的消息]"
+            )
+            self.content = "[语音消息]"
+        elif self.type == 5:
+            self.content = f"[系统消息] {self.content}"
+        elif self.type == 6:
+            self.ext = self.content
+            # 处理ext可能是字典的情况
+            if isinstance(self.ext, dict):
+                title = self.ext.get("Title", "")
+                type_str = self.ext.get("TypeStr", "")
+                source = self.ext.get("Source", "")
+            else:
+                try:
+                    title = self.ext.Title
+                    type_str = self.ext.TypeStr
+                    source = self.ext.Source
+                except (AttributeError, TypeError):
+                    title = type_str = source = ""
+            self.content = f"[链接消息] {title} {type_str} {source}"
+        # ... 其他类型的处理类似，这里简化为一个通用处理方法
+        else:
+            self._handle_other_types()
+
+    def _handle_other_types(self):
+        """处理其他类型的消息"""
+        type_handlers = {
+            8: self._handle_file,
+            9: self._handle_card,
+            10: self._handle_location,
+            11: self._handle_redpacket,
+            12: self._handle_transfer,
+            13: self._handle_miniprogram,
+            14: self._handle_emotion,
+            15: self._handle_group_management,
+            16: self._handle_redpacket_received,
+            17: self._handle_group_system,
+            18: self._handle_article,
+            19: self._handle_voice_call,
+            20: self._handle_video_call,
+            21: self._handle_service_notification,
+            22: self._handle_quote,
+            23: self._handle_group_chain,
+            24: self._handle_video_channel,
+            25: self._handle_group_live,
+            26: self._handle_pat,
+            27: self._handle_share_music,
+            28: self._handle_video_live,
+            29: self._handle_customer_card,
+            30: self._handle_enterprise_card,
+            99: self._handle_unsupported,
+        }
+        
+        handler = type_handlers.get(self.type)
+        if handler:
+            handler()
+
+    def _handle_file(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            title = self.ext.get("Title", "")
+        else:
+            try:
+                title = self.ext.Title
+            except (AttributeError, TypeError):
+                title = ""
+        self.content = f"[文件] {title}"
+
+    def _handle_card(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            nickname = self.ext.get("Nickname", "")
+        else:
+            try:
+                nickname = self.ext.Nickname
+            except (AttributeError, TypeError):
+                nickname = ""
+        self.content = f"[名片] {nickname}"
+
+    def _handle_location(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            title = self.ext.get("Title", "")
+        else:
+            try:
+                title = self.ext.Title
+            except (AttributeError, TypeError):
+                title = ""
+        self.content = f"[位置] {title}"
+
+    def _handle_redpacket(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            title = self.ext.get("Title", "")
+        else:
+            try:
+                title = self.ext.Title
+            except (AttributeError, TypeError):
+                title = ""
+        self.content = f"[红包] {title}"
+
+    def _handle_transfer(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            pay_subtype = self.ext.get("PaySubType", "")
+            title = self.ext.get("Title", "")
+            feedesc = self.ext.get("Feedesc", "")
+        else:
+            try:
+                pay_subtype = self.ext.PaySubType
+                title = self.ext.Title
+                feedesc = self.ext.Feedesc
+            except (AttributeError, TypeError):
+                pay_subtype = title = feedesc = ""
+        self.content = f"[转账{pay_subtype}] {title} {feedesc}"
+
+    def _handle_miniprogram(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            source = self.ext.get("Source", "")
+            title = self.ext.get("Title", "")
+            thumb = self.ext.get("Thumb", "")
+        else:
+            try:
+                source = self.ext.Source
+                title = self.ext.Title
+                thumb = self.ext.Thumb
+            except (AttributeError, TypeError):
+                source = title = thumb = ""
+        self.content = f"[小程序] | {source} | {title}"
+        self.thumb = thumb
+
+    def _handle_emotion(self):
+        self.ext = self.content
+        self.content = "[微信表情]"
+
+    def _handle_group_management(self):
+        self.ext = self.content
+        self.content = "[群管理消息]"
+
+    def _handle_redpacket_received(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            title = self.ext.get("Title", "")
+        else:
+            try:
+                title = self.ext.Title
+            except (AttributeError, TypeError):
+                title = ""
+        self.content = f"[领取红包消息] {title}"
+
+    def _handle_group_system(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            title = self.ext.get("title", "")
+            user = self.ext.get("user", "")
+        else:
+            try:
+                title = self.ext.title
+                user = self.ext.user
+            except (AttributeError, TypeError):
+                title = user = ""
+        self.content = f"[群聊系统消息] {title}"
+        self.sender = user
+
+    def _handle_article(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            title = self.ext.get("Title", "")
+        else:
+            try:
+                title = self.ext.Title
+            except (AttributeError, TypeError):
+                title = ""
+        self.content = f"[公众号文章] {title}"
+
+    def _handle_voice_call(self):
+        self.ext = self.content
+        self.content = "[语音通话]"
+
+    def _handle_video_call(self):
+        self.ext = self.content
+        self.content = "[视频通话]"
+
+    def _handle_service_notification(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            title = self.ext.get("title", "")
+        else:
+            try:
+                title = self.ext.title
+            except (AttributeError, TypeError):
+                title = ""
+        self.content = f"[服务通知] {title}"
+
+    def _handle_quote(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            title = self.ext.get("title", "")
+            display_name = self.ext.get("displayName", "")
+            content = self.ext.get("content", "")
+        else:
+            try:
+                title = self.ext.title
+                display_name = self.ext.displayName
+                content = self.ext.content
+            except (AttributeError, TypeError):
+                title = display_name = content = ""
+        self.content = f"{title} \n [引用消息] {display_name}: {content}"
+
+    def _handle_group_chain(self):
+        self.ext = self.content
+        self.content = "[群接龙]"
+
+    def _handle_video_channel(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            des = self.ext.get("des", "")
+        else:
+            try:
+                des = self.ext.des
+            except (AttributeError, TypeError):
+                des = ""
+        self.content = f"[视频号消息] {des}"
+
+    def _handle_group_live(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            title = self.ext.get("Title", "")
+        else:
+            try:
+                title = self.ext.Title
+            except (AttributeError, TypeError):
+                title = ""
+        self.content = f"[群直播消息] {title}"
+
+    def _handle_pat(self):
+        self.content = f"[拍一拍] {self.content}"
+
+    def _handle_share_music(self):
+        self.ext = self.content
+        self.content = "[分享音乐]"
+
+    def _handle_video_live(self):
+        self.ext = self.content
+        self.content = "[视频号直播]"
+
+    def _handle_customer_card(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            title = self.ext.get("Title", "")
+        else:
+            try:
+                title = self.ext.Title
+            except (AttributeError, TypeError):
+                title = ""
+        self.content = f"[客服号名片] {title}"
+
+    def _handle_enterprise_card(self):
+        self.ext = self.content
+        if isinstance(self.ext, dict):
+            title = self.ext.get("Title", "")
+        else:
+            try:
+                title = self.ext.Title
+            except (AttributeError, TypeError):
+                title = ""
+        self.content = f"[企业微信名片] {title}"
+
+    def _handle_unsupported(self):
+        self.ext = self.content
+        self.content = "[不支持的消息]"
 
     def __to_dict__(self):
         return {
