@@ -10,6 +10,7 @@ temp
 temp.py
 temp/
 *.txt
+*.xlsx
 
 # C extensions
 *.so
@@ -69,6 +70,7 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 *.db
+*.sql
 
 # Flask stuff:
 instance/

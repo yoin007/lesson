@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 import re
 import sqlite3
+from models.manage.member import Member
 
 
 def process_nested_dict(d):
@@ -85,7 +86,7 @@ class WxMsg:
             self.msg_id = getattr(msg, "msgsvrid", "")
             self.create_time = getattr(msg, "createTime", 0)
             self.ext = getattr(msg, "ext", "")
-        
+
         self.thumb = ""
         self.is_at = self._is_at()
         self.parse_content()
@@ -127,7 +128,7 @@ class WxMsg:
     def _process_by_type(self):
         """根据消息类型处理内容"""
         content = self.content
-        
+
         # 处理不同类型的消息
         if self.type == 2:
             self.ext = self.content
@@ -144,7 +145,11 @@ class WxMsg:
             self.sender = (
                 self.roomid
                 if not self.is_group
-                else content.split(":http")[0] if isinstance(content, str) and ":http" in content else ""
+                else (
+                    content.split(":http")[0]
+                    if isinstance(content, str) and ":http" in content
+                    else ""
+                )
             )
             self.ext = (
                 content
@@ -205,7 +210,7 @@ class WxMsg:
             30: self._handle_enterprise_card,
             99: self._handle_unsupported,
         }
-        
+
         handler = type_handlers.get(self.type)
         if handler:
             handler()
@@ -444,21 +449,43 @@ class WxMsg:
 
     def __str__(self) -> str:
         # TODO: 根据联系人信息，显示联系人/群聊名称
-        s = ""
-        if self.is_self:
-            s += f"### 发送消息 {self.msg_id} ###\n"
-        else:
-            s += f"### 收到消息 {self.msg_id} ###\n"
-        if self.is_group:
-            s += f"群聊消息：{self.roomid}\n"
-        else:
-            s += f"单聊消息\n"
-        # 将毫秒时间戳转换为秒
+        s = "\n"
         timestamp_seconds = self.create_time / 1000
-        s += f"{self.sender} | {self.msg_id} | {datetime.fromtimestamp(timestamp_seconds)} | {self.type}"
-        s += f"\ncontent: {self.content}"
-        s += f"\nthumb: {self.thumb}" if self.thumb else ""
-        s += f"\next: {self.ext}" if self.ext else ""
+        formatted_time = datetime.fromtimestamp(timestamp_seconds).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        with Member() as m:
+            # 添加分隔线和消息头部
+            s += "=" * 50 + "\n"
+            if self.is_self:
+                s += f"📤 发送消息 | {formatted_time} | ID: {self.msg_id}\n"
+            else:
+                s += f"📥 收到消息 | {formatted_time} | ID: {self.msg_id}\n"
+            s += "-" * 50 + "\n"
+
+            # 消息来源信息
+            if self.is_group:
+                room_name = m.chatroom_name(self.roomid)[0]
+                s += f"📱 来源: 群聊 {room_name} [{self.roomid}]]\n"
+                s += f"👤 发送者: {self.sender}\n"
+            else:
+                remarks = m.wxid_remark(self.sender)
+                remark = remarks[0] if remarks[0] else remarks[1]
+                s += f"📱 来源: 单聊 [{remark}]\n"
+                s += f"👤 联系人: {self.sender}\n"
+
+            # 消息内容
+            s += f"📋 类型: {self.type}\n"
+            s += f"📝 内容:\n{'-'*4}\n{self.content}\n{'-'*4}\n"
+
+            # 附加信息（如果有）
+            if self.thumb:
+                s += f"🖼️ 缩略图: {self.thumb}\n"
+            if self.ext:
+                s += f"⚙️ 扩展信息: {self.ext}\n"
+
+            # 添加底部分隔线
+            s += "=" * 50
         return s
 
     def _is_at(self) -> bool:

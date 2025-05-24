@@ -1,0 +1,1 @@
+from models.manage.member import query_permission

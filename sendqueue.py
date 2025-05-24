@@ -18,6 +18,7 @@ from client import Client
 log = LogConfig().get_logger()
 config = Config()
 base_url = config.get_config("base_url")
+static_url = config.get_config("static_url")
 
 
 class QueueDB:
@@ -158,48 +159,60 @@ class QueueDB:
                 log.error(f'消费消息队列失败: {e}-{record[5] if record else ""}')
                 return None
 
-    def send_text(
-        self,
-        msg: str,
-        receiver: str,
-        aters: str = "",
-        producer: str = "main",
-    ):
-        data = {
-            "friend_id": receiver,
-            "message": msg,
-            "remark": aters,
-            "content_type": 1,
+def send_text(content: str, receiver: str, aters: str="", producer: str = "main"):
+    """发送文本消息"""
+    data = {
+        "friend_id": receiver,
+        "message": content,
+        "remark": aters,
+        "content_type": 1,
+    }
+    with QueueDB() as queue:  # 使用上下文管理器
+        queue.__produce__(data, base_url + "send_message_250514.html", producer)
+
+def send_image(path: str = "", receiver: str = "", producer: str = "main"):
+    """发送图片消息"""
+    # 处理path
+    if not (path.startswith("http://") or path.startswith("https://")):
+        path = static_url + path
+    data = {
+        "friend_id": receiver,
+        "message": path,
+        "content_type": 2
+    }
+    with QueueDB() as queue:  # 使用上下文管理器
+        queue.__produce__(data, base_url + "send_message_250514.html", producer)
+
+def send_file(file_dict, receiver: str = "", producer: str = "main"):
+    """发送文件消息"""
+    # 处理字符串类型的参数
+    if isinstance(file_dict, str):
+        file_path = file_dict
+        file_name = file_path.split('/')[-1]
+        file_dict = {
+            "name": file_name,
+            "url": file_path
         }
-        self.__produce__(data, base_url + "send_message_250514.html", producer)
+    # 处理path
+    if not (file_dict.get('url', '').startswith("http://") or file_dict.get('url', '').startswith("https://")):
+        file_dict['url'] = static_url + file_dict.get('url')
+    data = {
+        "friend_id": receiver,
+        "content_type": "8",
+        "message": json.dumps(file_dict),
+    }
+    with QueueDB() as queue:  # 使用上下文管理器
+        queue.__produce__(data, base_url + "send_message_250514.html", producer)
 
-    def send_image(self, img_path: str, receiver: str, producer: str = "main"):
-        try:
-            data = {"friend_id": receiver, "message": img_path, "content_type": 2}
-            self.__produce__(data, base_url + "send_message_250514.html", producer)
-        except Exception as e:
-            self.send_text(m_id, f"{img_path}图片发送失败", receiver)
-
-    def send_file(self, file_content: str, receiver: str, producer: str = "main"):
-        pass
-
-    def send_rich_text(
-        self,
-        des: str,
-        thumb: str,
-        title: str,
-        url: str,
-        receiver: str,
-        producer: str = "main",
-    ):
-        data = {
-            "friend_id": receiver,
-            "message": json.dumps(
-                {"des": des, "thumb": thumb, "title": title, "url": url}
-            ),
-            "content_type": 6,
-        }
-        self.__produce__(data, base_url + "send_message_250514.html", producer)
+def send_app_msg(xml_dict: dict, receiver: str, type: int = 13, producer: str = "main"):
+    """发送应用消息"""
+    data = {
+        "friend_id": receiver,
+        "content_type": type,
+        "message": json.dumps(xml_dict),
+    }
+    with QueueDB() as queue:  # 使用上下文管理器
+        queue.__produce__(data, base_url + "send_message_250514.html", producer)
 
 
 if __name__ == "__main__":

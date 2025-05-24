@@ -4,7 +4,7 @@
 import json
 import logging
 from time import sleep
-from typing import Optional
+from typing import Optional, Dict, Any, Union
 
 import requests
 from config.config import Config
@@ -23,13 +23,24 @@ class Client:
         self.wxid = self.config.get_config("bot_wxid")
         self.LOG = logging.getLogger("Bot")
         self._token = self.config.get_config("token")
+        self.static_url = self.config.get_config("static_url")
 
     def _check_token(self):
         """检查token是否过期，过期则重新获取"""
         return self._token
 
-    def send_text(self, content: str, receiver: str, aters: Optional[str] = ""):
-        """发送消息"""
+    def _make_request(self, endpoint: str, data: Dict[str, Any], params: Dict[str, Any] = None) -> Union[str, int]:
+        """通用HTTP请求方法
+        
+        Args:
+            endpoint: API端点
+            data: 请求数据
+            params: URL参数
+            
+        Returns:
+            str: 成功时返回响应内容
+            int: 失败时返回-1
+        """
         token = self._check_token()
         if not token:
             self.LOG.error("获取token失败")
@@ -40,132 +51,97 @@ class Client:
                 "content-type": "application/x-www-form-urlencoded; charset=utf-8",
                 "Authorization": f"Bearer {token}",
             }
-            data = {
-                "friend_id": receiver,
-                "message": content,
-                "remark": aters,
-                "content_type": 1,
-            }
+            
             response = requests.post(
-                self.base_url + "send_message_250514.html",
+                self.base_url + endpoint,
                 headers=headers,
                 data=data,
+                params=params,
                 timeout=30,
             )
-            response.raise_for_status()  # 如果响应状态码指示错误，将抛出HTTPError异常
-            return response.content.decode("utf-8")  # 返回解码后的响应内容
+            response.raise_for_status()
+            return response.content.decode("utf-8")
         except requests.exceptions.RequestException as e:
-            error_message = "HTTP Request failed: {}".format(e)
+            error_message = f"HTTP Request failed: {e}"
+            self.LOG.error(error_message)
             print(error_message)
-            return error_message  # 将错误信息赋值给变量并返回
+            return error_message
+
+    def send_text(self, content: str, receiver: str, aters: Optional[str] = ""):
+        """发送文本消息"""
+        data = {
+            "friend_id": receiver,
+            "message": content,
+            "remark": aters,
+            "content_type": 1,
+        }
+        return self._make_request("send_message_250514.html", data)
 
     def send_image(self, path: str = "", receiver: str = ""):
-        """发送图片"""
-        token = self._check_token()
-        if not token:
-            self.LOG.error("获取token失败")
-            return -1
+        """发送图片消息"""
+        # 处理path
+        if not (path.startswith("http://") or path.startswith("https://")):
+            path = self.static_url + path
 
-        try:
-            headers = {
-                "content-type": "application/x-www-form-urlencoded; charset=utf-8",
-                "Authorization": f"Bearer {token}",
-            }
-            data = {"friend_id": receiver, "message": path, "content_type": 2}
-            response = requests.post(
-                self.base_url + "send_message_250514.html",
-                headers=headers,
-                data=data,
-                timeout=30,
-            )
-            response.raise_for_status()  # 如果响应状态码指示错误，将抛出HTTPError异常
-            return response.content.decode("utf-8")  # 返回解码后的响应内容
-        except requests.exceptions.RequestException as e:
-            error_message = "HTTP Request failed: {}".format(e)
-            print(error_message)
-            return error_message  # 将错误信息赋值给变量并返回
+        data = {
+            "friend_id": receiver,
+            "message": path,
+            "content_type": 2
+        }
+        return self._make_request("send_message_250514.html", data)
 
-    def send_rich_text(self, des: str, thumb: str, title: str, url: str, receiver: str):
+    def send_rich_text(self, card_dict: dict, receiver: str):
         """发送富文本消息"""
-        token = self._check_token()
-        if not token:
-            self.LOG.error("获取token失败")
-            return -1
+        data = {
+            "friend_id": receiver,
+            "message": json.dumps(card_dict),
+            "content_type": 6,
+        }
+        return self._make_request("send_message_250514.html", data)
 
-        try:
-            headers = {
-                "content-type": "application/x-www-form-urlencoded; charset=utf-8",
-                "Authorization": f"Bearer {token}",
-            }
-            data = {
-                "friend_id": receiver,
-                "message": json.dumps(
-                    {"des": des, "thumb": thumb, "title": title, "url": url}
-                ),
-                "content_type": 6,
-            }
-            response = requests.post(
-                self.base_url + "send_message_250514.html",
-                headers=headers,
-                data=data,
-                timeout=30,
-            )
-            response.raise_for_status()  # 如果响应状态码指示错误，将抛出HTTPError异常
-            return response.content.decode("utf-8")  # 返回解码后的响应内容
-        except requests.exceptions.RequestException as e:
-            error_message = "HTTP Request failed: {}".format(e)
-            print(error_message)
-            return error_message  # 将错误信息赋值给变量并返回
-
-    def send_app(self, xml: str, receiver: str, type: int = 49):
+    def send_app(self, xml_dict: dict, receiver: str, type: int = 13):
         """发送应用消息
         Args:
-            xml (str): 应用消息的xml内容
+            xml_dict (dict): xml
             receiver (str): 接收者wxid
-            type (int): 消息类型，默认为49
+            type (int): 消息类型，默认13为
         Returns:
             int: 0表示成功，-1表示失败
         """
-        token = self._check_token()
-        if not token:
-            self.LOG.error("获取token失败")
-            return -1
+        data = {
+            "friend_id": receiver,
+            "content_type": type,
+            "message": json.dumps(xml_dict),
+        }
+        return self._make_request("send_message_250514.html", data)
 
-        try:
-            url = f"{self.base_api}/Msg/SendApp"
-            headers = {
-                "content-type": "application/x-www-form-urlencoded; charset=utf-8",
-                "Authorization": f"Bearer {token}",
-            }
-            data = {"ToWxid": receiver, "Type": type, "Wxid": self.wxid, "Xml": xml}
-
-            response = requests.post(url, headers=headers, json=data)
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("Success"):
-                    # print(data)
-                    return 0
-                else:
-                    self.LOG.error(f"发送应用消息失败: {data.get('Message')}")
-                    return -1
-            return -1
-        except Exception as e:
-            self.LOG.error(f"发送应用消息失败: {e}")
-            return -1
-
-    def send_file(self, content: str, receiver: str):
-        """发送CDN文件
+    def send_file(self, file_dict, receiver: str):
+        """发送文件
         Args:
-            content (str): 收到文件消息xml
+            file_dict (dict or str): 文件信息字典或文件路径
             receiver (str): 接收者wxid
         Returns:
             int: 0表示成功，-1表示失败
         """
-        token = self._check_token()
-        if not token:
-            self.LOG.error("获取token失败")
-            return -1
-        # TODO: 实现发送CDN文件
+        # 处理字符串类型的参数
+        if isinstance(file_dict, str):
+            file_path = file_dict
+            file_name = file_path.split('/')[-1]
+            file_dict = {
+                "name": file_name,
+                "url": file_path
+            }
+            
+        # 处理path
+        if not (file_dict.get("url", "").startswith("http://") or file_dict.get("url", "").startswith("https://")):
+            file_dict["url"] = self.static_url + file_dict.get("url")
+        print(file_dict)
+        data = {
+            "friend_id": receiver,
+            "content_type": "8",
+            "message": json.dumps(file_dict),
+        }
+        return self._make_request("send_message_250514.html", data)
 
     def down_file(self, msg_id) -> str:
         """下载文件"""
@@ -176,48 +152,79 @@ class Client:
 
         def trigger_download_file(msg_id):
             """触发下载文件"""
-            try:
-                headers = {
-                    "content-type": "application/x-www-form-urlencoded; charset=utf-8",
-                    "Authorization": f"Bearer {token}",
-                }
-                data = {"msg_svr_id": msg_id}
-                response = requests.post(
-                    self.base_url + "trigger_download_file.html",
-                    headers=headers,
-                    data=data,
-                    timeout=30,
-                )
-                response.raise_for_status()  # 如果响应状态码指示错误，将抛出HTTPError异常
-                return response.content.decode("utf-8")  # 返回解码后的响应内容
-            except requests.exceptions.RequestException as e:
-                error_message = "HTTP Request failed: {}".format(e)
-                print(error_message)
-                return error_message  # 将错误信息赋值给变量并返回
+            data = {"msg_svr_id": msg_id}
+            return self._make_request("trigger_download_file.html", data)
 
         for _ in range(10):
             res = trigger_download_file(msg_id)
-            res = json.loads(res)
-            print(res)
-            if res.get("success"):
-                sleep(3)
-            elif res.get("message") == "这条消息不是文件类型！":
+            try:
+                res_json = json.loads(res)
+                print(res_json)
+                if res_json.get("success"):
+                    sleep(3)
+                elif res_json.get("message") == "这条消息不是文件类型！":
+                    return ""
+                elif res_json.get("message") == "文件已下载":
+                    return res_json.get("url")
+            except (json.JSONDecodeError, TypeError):
+                self.LOG.error(f"解析响应失败: {res}")
                 return ""
-            elif res.get("message") == "文件已下载":
-                return res.get("url")
+        return ""
     
-    def contact_info(self):
-        """type：0通讯录 1群聊"""
-        token = self._check_token()
+    def contact_info(self, content_type=0):
+        """获取联系人信息
+        Args:
+            content_type (int): 0通讯录 1群聊
+        Returns:
+            dict: 包含所有联系人信息的字典
+        """
+        all_contacts = []
+        current_page = 1
+        total_page = 1
+        
+        # 循环获取所有页面的联系人信息
+        while current_page <= total_page:
+            params = {
+                "page": current_page,
+                "type": content_type,
+            }
+            response = self._make_request("get_contact_info.html", {}, params)
+            
+            try:
+                # 解析响应数据
+                res_data = json.loads(response)
+                if not res_data.get("success"):
+                    self.LOG.error(f"获取联系人信息失败: {res_data.get('message')}")
+                    break
+                
+                # 提取联系人列表并合并
+                contacts_list = res_data.get("data", {}).get("list", [])
+                all_contacts.extend(contacts_list)
+                
+                # 更新总页数和当前页码
+                page_info = res_data.get("data", {}).get("page", {})
+                total_page = page_info.get("total_page", 1)
+                current_page += 1
+                
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
+                self.LOG.error(f"解析联系人信息失败: {e}, 响应内容: {response}")
+                break
+        
+        # 返回包含所有联系人的结果
+        return all_contacts
+        # return {
+        #     "success": True,
+        #     "message": "获取所有联系人信息成功",
+        #     "data": {
+        #         "list": all_contacts,
+        #         "total": len(all_contacts)
+        #     }
+        # }
 
 
 if __name__ == "__main__":
-    static_url = Config().get_config('static_url')
+    # static_url = Config().get_config('static_url')
     c = Client()
-    # r = c.send_rich_text(des="❗戳我看看今天吃啥👉", thumb="http://b0.wcr222.top/2024/06/29/62b8d90380a449919e90d235d6109586.png", title="外卖红包天天领🧧", url="https://my-bucket-8ynxqsg-1305062151.cos-website.ap-guangzhou.myqcloud.com/uviewui/waimai668.html", receiver="yoin007")
-    # r = c.down_file("9098001182538937472")
-    r = c.send_image(
-        static_url + "temp/yoin007.png",
-        "yoin007",
-    )
+    r = c.send_text('今天好热啊', "57477785315@chatroom", 'yoin007')
+
     print(r)
