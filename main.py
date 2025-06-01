@@ -18,6 +18,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import random
 from sendqueue import QueueDB, send_text
+from models.task import task_start
 
 log = LogConfig().get_logger()
 config = Config()
@@ -37,6 +38,7 @@ async def consume_queue():
 async def lifespan(app: FastAPI):
     # 启动时启动队列消费任务
     tasks = [
+        asyncio.create_task(task_start()),  # 删除多余的逗号
         asyncio.create_task(consume_queue()),
     ]
 

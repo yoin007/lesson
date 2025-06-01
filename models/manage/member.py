@@ -2,8 +2,10 @@
 # @Time:2025/05/20
 # @Author: Tech_T
 
+import re
 import sqlite3
 from config.log import LogConfig
+from config.config import Config
 from client import Client
 from sendqueue import send_text
 
@@ -334,8 +336,13 @@ class Member:
             self.__conn__.commit()
             return m.__cursor__.rowcount
 
-    def member_info(self, uuid):
+    def member_info(self, uuid=''):
         """获取成员信息"""
+        if uuid == '':
+            with self as m:
+                m.__cursor__.execute("SELECT * FROM member")
+                result = m.__cursor__.fetchall()
+            return result if result else None
         with self as m:
             m.__cursor__.execute("SELECT * FROM member WHERE uuid =?", (uuid,))
             result = m.__cursor__.fetchone()
@@ -393,22 +400,22 @@ class Member:
             self.__conn__.commit()
             return m.__cursor__.rowcount
 
-    def delte_permission(self, func):
+    def delte_permission(self, id):
         """删除权限"""
         with self as m:
-            m.__cursor__.execute("DELETE FROM permission WHERE func =?", (func,))
+            m.__cursor__.execute("DELETE FROM permission WHERE id =?", (id,))
             self.__conn__.commit()
             return m.__cursor__.rowcount
 
-    def permission_info(self, id=0):
+    def permission_info(self, func=''):
         """获取权限信息"""
-        if id == 0:
+        if func == '':
             with self as m:
                 m.__cursor__.execute("SELECT * FROM permission")
                 result = m.__cursor__.fetchall()
             return result if result else None
         with self as m:
-            m.__cursor__.execute("SELECT * FROM permission WHERE id =?", (id,))
+            m.__cursor__.execute("SELECT * FROM permission WHERE func =?", (func,))
             result = m.__cursor__.fetchone()
         return result if result else None
 
@@ -461,23 +468,212 @@ async def query_permission(record):
     if not permission:
         send_text('权限查询失败：权限不存在', record.sender)
         return None
-    tips = f"权限id：{permission[0]}\n" \
-           f"权限名称：{permission[1]}\n" \
-           f"权限状态：{'激活' if permission[2] else '禁用'}\n" \
-           f"黑名单：{permission[3]}\n" \
-           f"白名单：{permission[4]}\n" \
-           f"权限类型：{permission[5]}\n" \
-           f"权限模式：{permission[6]}\n" \
-           f"关键词：{permission[7]}\n" \
-           f"AI模式：{'开启' if permission[8] else '关闭'}\n" \
-           f"@机器人：{'开启' if permission[9] else '关闭'}\n" \
-           f"回复内容：{permission[10]}\n" \
-           f"模块：{permission[11]}\n" \
-           f"权限等级：{permission[12]}\n" \
-           f"示例：{permission[13]}\n" \
-           f"权限检查：{'开启' if permission[14] else '关闭'}\n" \
-           f"积分：{permission[15]}\n" \
-           f"余额：{permission[16]}\n" \
-           f"备注：{permission[17]}"
+    tips = f"权限ID：{permission[0]}\n" \
+           f"功能：{permission[1]}\n" \
+           f"功能名称：{permission[2]}\n" \
+           f"是否启用：{permission[3]}\n" \
+           f"黑名单：{permission[4]}\n" \
+           f"白名单：{permission[5]}\n" \
+           f"类型：{permission[6]}\n" \
+           f"匹配模式：{permission[7]}\n" \
+           f"关键词：{permission[8]}\n" \
+           f"AI标记：{permission[9]}\n" \
+           f"是否需要@：{permission[10]}\n" \
+           f"回复内容：{permission[11]}\n" \
+           f"所属模块：{permission[12]}\n" \
+           f"权限等级：{permission[13]}\n" \
+           f"使用示例：{permission[14]}\n" \
+           f"权限检查：{permission[15]}\n" \
+           f"所需积分：{permission[16]}\n" \
+           f"所需余额：{permission[17]}"
     send_text(tips, record.sender)
     return None
+
+async def insert_permission(record):
+    """插入权限"""
+    text = record.content.replace('+权限\n', '')
+    
+    # 使用正则表达式匹配各个字段
+    func = re.search(r"功能：(.+)\n", text)
+    func_name = re.search(r"功能名称：(.+)\n", text)
+    activate = re.search(r"是否启用：(.+)\n", text)
+    black_list = re.search(r"黑名单：(.+)\n", text)
+    white_list = re.search(r"白名单：(.+)\n", text)
+    type_val = re.search(r"类型：(.+)\n", text)
+    pattern = re.search(r"匹配模式：(.+)\n", text)
+    keywords = re.search(r"关键词：(.+)\n", text)
+    ai_flag = re.search(r"AI标记：(.+)\n", text)
+    need_at = re.search(r"是否需要@：(.+)\n", text)
+    # 使用非贪婪匹配和多行模式来获取回复内容
+    reply = re.search(r"回复内容：([\s\S]*?)\n所属模块", text)
+    module = re.search(r"所属模块：(.+)\n", text)
+    level = re.search(r"权限等级：(.+)\n", text)
+    example = re.search(r"使用示例：(.+)\n", text)
+    check_permission = re.search(r"权限检查：(.+)\n", text)
+    score = re.search(r"所需积分：(.+)\n", text)
+    balance = re.search(r"所需余额：(.+)", text)
+    # 处理回复内容的多行文本，去除首尾空白字符
+    reply_content = reply.group(1).strip() if reply else ''
+    # 验证必要字段
+    if not all([func, func_name, pattern]):
+        send_text("添加权限失败：缺少必要字段（功能、功能名称、匹配模式）", record.sender)
+        return None
+    
+    with Member() as m:
+        result = m.insert_permission(
+            func=func.group(1),
+            func_name=func_name.group(1),
+            activate=int(activate.group(1)) if activate else 1,
+            black_list=black_list.group(1) if black_list and black_list.group(1) != 'None' else '',
+            white_list=white_list.group(1) if white_list and white_list.group(1) != 'None' else '',
+            type=type_val.group(1) if type_val and type_val.group(1) != 'None' else '',
+            pattern=pattern.group(1),
+            keywords=keywords.group(1) if keywords and keywords.group(1) != 'None' else '',
+            ai_flag=int(ai_flag.group(1)) if ai_flag else 0,
+            need_at=int(need_at.group(1)) if need_at else 0,
+            reply=reply_content,
+            module=module.group(1) if module and module.group(1) != 'None' else '',
+            level=int(level.group(1)) if level else 1,
+            example=example.group(1) if example and example.group(1) != 'None' else '',
+            check_permission=int(check_permission.group(1)) if check_permission else 1,
+            score=int(score.group(1)) if score else 0,
+            balance=int(balance.group(1)) if balance else 0
+        )
+    
+    if result > 0:
+        send_text("添加权限成功", record.sender)
+    else:
+        send_text("添加权限失败", record.sender)
+    return None
+
+async def add_member(record):
+    """插入会员：+会员：abc-10-lesson"""
+    level = 1
+    model = 'basic'
+    if '@chatroom' in record.roomid:
+        send_text('群会员添加功能暂未实现！', record.sender) 
+        return 0
+    results = record.content.split('-')
+    if len(results) >= 3:
+        try:
+            level = results[1]
+            model = results[2]
+            member_str = record.content.replace('：', ':').replace(' ','').split('-')[0].split(':')[1]
+            member_list = member_str.split(',')
+            for mb in member_list:
+                with Member() as m:
+                    row = m.member_info(mb)
+                if row:
+                    send_text(f"会员已存在: {mb}", record.sender)
+                else:
+                    name = ''
+                    alias = m.wxid_remark(mb)
+                    if alias:
+                        name = alias[0] if alias[0] else alias[1]
+                    if name:
+                        with Member() as m:
+                            r = m.insert_member(mb, mb, name, level=level, model=model)
+                            if r >= 1:
+                                send_text(f'添加会员：{mb} {name}')
+                                return 0
+                    send_text(f"添加会员出错：{record.msg_id} {record.content}", record.sender)
+                    return -1
+        except Exception as e:
+            send_text(f"添加会员出错3：{record.msg_id}-{str(e)}", record.sender)
+            return -1
+
+async def del_member(record):
+    """删除会员"""
+    member_str = record.content.replace('-会员', '').replace('：', ':').replace(' ','').split(':')[1]
+    member_list = member_str.split(',')
+    for mb in member_list:
+        with Member() as m:
+            r = m.delte_member(mb)
+            if r >= 1:
+                send_text(f'删除会员：{mb}')
+                return 0
+    send_text(f"删除会员出错：{record.msg_id} {record.content}", record.sender)
+    return -1
+
+async def query_members(record):
+    """查询会员"""
+    with Member() as m:
+        member_list = m.member_info()
+    if not member_list:
+        send_text('查询会员失败：会员列表为空', record.sender)
+        return None
+    tips = f'当前共有{len(member_list)}位会员：\n'
+    for member in member_list:
+        tips += f"uuid：{member[1]}, alias:{member[3]},level:{member[6]},model:{member[7]}\n"
+    send_text(tips, record.sender)
+    return None
+
+async def start_func(record):
+    """启动功能"""
+    if record.sender not in Config().get_config("admin_list"):
+        send_text('权限不足', record.sender)
+        return None
+    pattern = r"^START (.*)"
+    match = re.search(pattern, record.content)
+    if match:
+        func_id = match.group(1)
+        try:
+            with Member() as m:
+                m.activate_func(func_id)
+                send_text(f"start_func: {func_id}", record.sender)
+                return True
+        except Exception as e:
+            self.log.error(f"start_func Failed: {e}")
+            send_text(f"start_func Failed: {e}", record.sender)
+            return False
+    
+async def stop_func(record: any):
+    if record.sender not in Config().get_config('admin_list'):
+        return False
+    pattern = r"^STOP (.*)"
+    match = re.search(pattern, record.content)
+    if match:
+        func_id = match.group(1)
+        try:
+            with Member() as m:
+                m.deactivate_func(func_id)
+                send_text(f"stop_func: {func_id}", record.sender)
+                return True
+        except Exception as e:
+            self.log.error(f"stop_func Failed: {e}")
+            send_text(f"stop_func Failed: {e}", record.sender)
+            return False
+
+def check_permission(func):
+    async def wrapper(record, *args, **kwargs):
+        if has_permission(func, record, *args, **kwargs):
+            return await func(record, *args, **kwargs)
+        else:
+            send_text(f'{record.msg_id}-{func.__name__}:鉴权失败,请联系管理员吧', record.sender)
+            return None
+    return wrapper
+
+def has_permission(func, record, *args, **kwargs):
+    # TODO: 积分和余额的判断
+    if record.is_group:
+        uuid = record.sender + '#' + record.roomid
+    else:
+        uuid = record.sender
+    with Member() as m:
+        member_info = m.member_info(uuid)
+        permission = m.permission_info(func.__name__)
+    if not permission:
+        send_text(f'{record.msg_id}-{func.__name__}:未注册权限', record.roomid)
+        return False
+    if permission[15] == 0:
+        return True
+    if not member_info:
+        send_text(f'{record.msg_id}:未注册会员', record.roomid)
+        return False
+    if int(permission[13]) > int(member_info[6]):
+        send_text(f'{record.msg_id}-{func.__name__}:会员等级不足', record.roomid)
+        return False
+    if permission[12] not in member_info[7].split('/'):
+        send_text(f'{record.msg_id}-{func.__name__}:会员模块不足', record.roomid)
+        return False
+    return True
