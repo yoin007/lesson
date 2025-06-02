@@ -29,14 +29,16 @@ class Client:
         """检查token是否过期，过期则重新获取"""
         return self._token
 
-    def _make_request(self, endpoint: str, data: Dict[str, Any], params: Dict[str, Any] = None) -> Union[str, int]:
+    def _make_request(
+        self, endpoint: str, data: Dict[str, Any], params: Dict[str, Any] = None
+    ) -> Union[str, int]:
         """通用HTTP请求方法
-        
+
         Args:
             endpoint: API端点
             data: 请求数据
             params: URL参数
-            
+
         Returns:
             str: 成功时返回响应内容
             int: 失败时返回-1
@@ -51,7 +53,7 @@ class Client:
                 "content-type": "application/x-www-form-urlencoded; charset=utf-8",
                 "Authorization": f"Bearer {token}",
             }
-            
+
             response = requests.post(
                 self.base_url + endpoint,
                 headers=headers,
@@ -83,11 +85,7 @@ class Client:
         if not (path.startswith("http://") or path.startswith("https://")):
             path = self.static_url + path
 
-        data = {
-            "friend_id": receiver,
-            "message": path,
-            "content_type": 2
-        }
+        data = {"friend_id": receiver, "message": path, "content_type": 2}
         return self._make_request("send_message_250514.html", data)
 
     def send_rich_text(self, card_dict: dict, receiver: str):
@@ -126,14 +124,14 @@ class Client:
         # 处理字符串类型的参数
         if isinstance(file_dict, str):
             file_path = file_dict
-            file_name = file_path.split('/')[-1]
-            file_dict = {
-                "name": file_name,
-                "url": file_path
-            }
-            
+            file_name = file_path.split("/")[-1]
+            file_dict = {"name": file_name, "url": file_path}
+
         # 处理path
-        if not (file_dict.get("url", "").startswith("http://") or file_dict.get("url", "").startswith("https://")):
+        if not (
+            file_dict.get("url", "").startswith("http://")
+            or file_dict.get("url", "").startswith("https://")
+        ):
             file_dict["url"] = self.static_url + file_dict.get("url")
         print(file_dict)
         data = {
@@ -170,7 +168,7 @@ class Client:
                 self.LOG.error(f"解析响应失败: {res}")
                 return ""
         return ""
-    
+
     def contact_info(self, content_type=0):
         """获取联系人信息
         Args:
@@ -181,7 +179,7 @@ class Client:
         all_contacts = []
         current_page = 1
         total_page = 1
-        
+
         # 循环获取所有页面的联系人信息
         while current_page <= total_page:
             params = {
@@ -189,42 +187,34 @@ class Client:
                 "type": content_type,
             }
             response = self._make_request("get_contact_info.html", {}, params)
-            
+
             try:
                 # 解析响应数据
                 res_data = json.loads(response)
                 if not res_data.get("success"):
                     self.LOG.error(f"获取联系人信息失败: {res_data.get('message')}")
                     break
-                
+
                 # 提取联系人列表并合并
                 contacts_list = res_data.get("data", {}).get("list", [])
                 all_contacts.extend(contacts_list)
-                
+
                 # 更新总页数和当前页码
                 page_info = res_data.get("data", {}).get("page", {})
                 total_page = page_info.get("total_page", 1)
                 current_page += 1
-                
+
             except (json.JSONDecodeError, TypeError, KeyError) as e:
                 self.LOG.error(f"解析联系人信息失败: {e}, 响应内容: {response}")
                 break
-        
+
         # 返回包含所有联系人的结果
         return all_contacts
-        # return {
-        #     "success": True,
-        #     "message": "获取所有联系人信息成功",
-        #     "data": {
-        #         "list": all_contacts,
-        #         "total": len(all_contacts)
-        #     }
-        # }
 
 
 if __name__ == "__main__":
     # static_url = Config().get_config('static_url')
     c = Client()
-    r = c.send_text('今天好热啊', "57477785315@chatroom", 'yoin007')
+    r = c.send_text("今天好热啊", "57477785315@chatroom", "yoin007")
 
     print(r)

@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import threading
 import time
 from datetime import datetime, timedelta
 from html2image import Html2Image
@@ -47,6 +48,7 @@ def error_handler(func):
 
 class Lesson:
     _instance = None  # 单例实例
+    _hti_lock = threading.Lock()  # 类级别的锁
 
     def __new__(cls):
         if cls._instance is None:
@@ -94,6 +96,11 @@ class Lesson:
         self._ip_info_cache = None
         self._contacts_cache = None
         self._time_table_cache = None
+
+        # 创建一个全局的Html2Image实例
+        self.hti = Html2Image()
+        self.hti.browser.flags = ["--headless=new"]
+        self.hti.output_path = os.path.join(self.lesson_dir, "temp")
 
         self.refresh_cache()
         self._initialized = True
@@ -231,8 +238,8 @@ class Lesson:
                 contacts_list = m.db_contacts()
                 for contact in contacts_list:
                     remark = m.wxid_remark(contact)
-                    if remark and remark[1][:2] == "天龙":
-                        contacts[remark[1].replace("天龙", "")] = contact
+                    if remark and remark[0][:2] == "天龙":
+                        contacts[remark[0].replace("天龙", "")] = contact
             return contacts
         except Exception as e:
             log.error(f"获取联系人信息失败: {str(e)}")
@@ -616,7 +623,6 @@ class Lesson:
 
             subjects = x.split("/")
             if len(subjects) == 2:
-                # print(subjects)
                 for subject in subjects:
                     if f"({week_flag})" in subject:
                         return subject.replace(f"({week_flag})", "").strip()
@@ -719,7 +725,6 @@ class Lesson:
             _current_schedule_file = self.current_schedule_file()
         else:
             return UPDATE_FAILED
-        # print(return_flag)
         schedule_dir = os.path.join(
             self.lesson_dir, self.current_month, "class_schedule"
         )
@@ -994,7 +999,6 @@ class Lesson:
             )
         old_df = self._read_excel_with_cache(old_schedule_file)
         new_df = self._read_excel_with_cache(new_schedule_file)
-        # print(new_schedule_file, old_schedule_file)
         old_df_teacher = self.repalce_subject_teacher(old_df, ignore=ignore)
         new_df_teacher = self.repalce_subject_teacher(new_df, ignore=ignore)
         class_list = self.class_template["class_name"].tolist()
@@ -1132,12 +1136,12 @@ class Lesson:
         with open(os.path.join(self.lesson_dir, "temp", f"{png_name}.html"), "r") as f:
             html_code = f.read()
 
-        hti = Html2Image()
-        hti.browser.flags = ["--headless=new"]
+        # 设置大小（这个可以在锁外设置）
+        self.hti.size = (1440, 35 * lines + 50)
 
-        hti.size = (1440, 35 * lines + 50)
-        hti.output_path = os.path.join(self.lesson_dir, "temp")
-        image = hti.screenshot(html_code, save_as=png_name)
+        # 使用类锁确保一次只有一个线程使用Html2Image
+        with Lesson._hti_lock:
+            image = self.hti.screenshot(html_code, save_as=png_name)
         return image
 
     def get_teacher_schedule(
@@ -1164,9 +1168,7 @@ class Lesson:
         teacher_df = pd.DataFrame(columns=week_list, index=schedule_order)
         # Filter the DataFrame to only include rows where the teacher is present
         teacher_schedule = df[df.isin([teacher_name]).any(axis=1)]
-        # print(teacher_schedule)
         for index, row in teacher_schedule.iterrows():
-            # print(index)
             week = row["week"]
             order = row["order"]
             teacher_column = row.index[row == teacher_name][0]
@@ -1187,7 +1189,6 @@ class Lesson:
         df = self.format_schedule(schedule_data)
         df["date"] = df["date"].astype(str)
         today = str(int(datetime.today().strftime("%d")))
-        # print(today)
         today_df = df[df["date"] == today]
         return today_df
 
@@ -1395,6 +1396,10 @@ async def update_schedule_all(record: any):
         zip(class_leaders["class_name"], class_leaders["class_en"])
     )  # 班级-班级名称en
     teacher_name = re.match(r"^(.+?)\s*的课表$", content).group(1)
+
+    # 创建异步任务列表
+    tasks = []
+
     if teacher_name == "更新所有人":
         # 通知所有老师
         for k, v in contacts.items():
@@ -1405,21 +1410,25 @@ async def update_schedule_all(record: any):
                 for a in l.admin:
                     send_text(f"{teacher_name}的课表不存在", a)
             else:
-                df_png = l.df_to_png(df, f"{wxid}.png", title=f"{teacher_name}的课表")[
-                    0
-                ]
-                pic_path = df_png[len(l.lesson_dir) :].replace("\\", "/")
-                send_image(pic_path, wxid, "lesson")
+                # 创建一个异步任务来处理图片生成和发送
+                tasks.append(
+                    process_and_send_image(
+                        l, df, f"{wxid}.png", f"{teacher_name}的课表", wxid, "lesson"
+                    )
+                )
+
         # 通知班主任班级课表
         for k, v in leaders_dict.items():
             class_df = l.get_class_schedule(k)
             title = f"{k}的课表"
-            class_pic = l.df_to_png(class_df, f"class_{v}.png", title=title)[0]
-            if class_pic:
-                wxids = l.get_wxids(k)
-                for wxid in wxids:
-                    pic_path = class_pic[len(l.lesson_dir) :].replace("\\", "/")
-                    send_image(pic_path, wxid, "lesson")
+            if not class_df.empty:
+                # 创建一个异步任务来处理图片生成和发送给多个接收者
+                tasks.append(
+                    process_and_send_class_image(
+                        l, class_df, f"class_{v}.png", title, k, "lesson"
+                    )
+                )
+
     elif teacher_name == "更新下周":
         # 通知所有老师
         for k, v in contacts.items():
@@ -1430,21 +1439,75 @@ async def update_schedule_all(record: any):
                 for a in l.admin:
                     send_text(f"{teacher_name}的课表不存在", a)
             else:
-                df_png = l.df_to_png(
-                    df, f"{wxid}.png", title=f"{teacher_name}下周的课表"
-                )[0]
-                pic_path = df_png[len(l.lesson_dir) :].replace("\\", "/")
-                send_image(pic_path, wxid, "lesson")
+                # 创建一个异步任务来处理图片生成和发送
+                tasks.append(
+                    process_and_send_image(
+                        l,
+                        df,
+                        f"{wxid}.png",
+                        f"{teacher_name}下周的课表",
+                        wxid,
+                        "lesson",
+                    )
+                )
+
         # 通知班主任班级课表
         for k, v in leaders_dict.items():
             class_df = l.get_class_schedule(k, week_next=True)
             title = f"{k}下周的课表"
-            class_pic = l.df_to_png(class_df, f"class_{v}.png", title=title)[0]
-            if class_pic:
-                wxids = l.get_wxids(k)
-                for wxid in wxids:
-                    pic_path = class_pic[len(l.lesson_dir) :].replace("\\", "/")
-                    send_image(pic_path, wxid, "lesson")
+            if not class_df.empty:
+                # 创建一个异步任务来处理图片生成和发送给多个接收者
+                tasks.append(
+                    process_and_send_class_image(
+                        l, class_df, f"class_{v}.png", title, k, "lesson"
+                    )
+                )
+
+    # 等待所有任务完成
+    if tasks:
+        import asyncio
+
+        await asyncio.gather(*tasks)
+
+
+async def process_and_send_image(lesson, df, png_name, title, wxid, producer):
+    """
+    异步处理图片生成和发送
+    """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    # 使用线程池执行CPU密集型的图片生成操作
+    with ThreadPoolExecutor() as executor:
+        df_png = await asyncio.get_event_loop().run_in_executor(
+            executor, lesson.df_to_png, df, png_name, title
+        )
+
+        if df_png:
+            pic_path = df_png[0][len(lesson.lesson_dir) :].replace("\\", "/")
+            # 发送图片
+            send_image(pic_path, wxid, producer)
+
+
+async def process_and_send_class_image(
+    lesson, class_df, png_name, title, class_name, producer
+):
+    """
+    异步处理班级图片生成和发送给多个接收者
+    """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    # 使用线程池执行CPU密集型的图片生成操作
+    with ThreadPoolExecutor() as executor:
+        class_pic = await asyncio.get_event_loop().run_in_executor(
+            executor, lesson.df_to_png, class_df, png_name, title
+        )
+        if class_pic:
+            pic_path = class_pic[0][len(lesson.lesson_dir) :].replace("\\", "/")
+            wxids = lesson.get_wxids(class_name)
+            for wxid in wxids:
+                send_image(pic_path, wxid, producer)
 
 
 @check_permission
@@ -1520,7 +1583,6 @@ async def teacher_schedule(record: any):
                 title = f"{teacher_name}的课表"
             df_png = l.df_to_png(df, f"{wxid}.png", title=title)[0]
             pic_path = df_png[len(l.lesson_dir) :].replace("\\", "/")
-            print("teacher", teacher_name, pic_path)
             send_image(pic_path, wxid, "lesson")
 
 
@@ -1646,7 +1708,6 @@ def today_teachers():
             tips = f"您今天有{len(v)}节课如下:"
             for course in v:
                 tips += f"\n{course}"
-            # print(wxid, tips)
             send_text(tips, wxid)
 
 
@@ -1743,7 +1804,6 @@ async def mass_message(record: any):
         xml_content = record.xml
         p = IPad()
         response_path = p.down_file(xml_content, new_notice_file, rename=True)
-        print(response_path, "++++++")
         if response_path == "":
             send_text("通知文件下载失败，请重新发送该文件！", record.roomid)
             return
