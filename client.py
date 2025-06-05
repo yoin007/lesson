@@ -133,7 +133,6 @@ class Client:
             or file_dict.get("url", "").startswith("https://")
         ):
             file_dict["url"] = self.static_url + file_dict.get("url")
-        print(file_dict)
         data = {
             "friend_id": receiver,
             "content_type": "8",
@@ -210,6 +209,60 @@ class Client:
 
         # 返回包含所有联系人的结果
         return all_contacts
+
+    def group_qr(self, roomid):
+        """获取群二维码"""
+        params = {"chat_room_id": roomid}
+        response = self._make_request("get_group_qr_code.html", params)
+        try:
+            # 解析响应数据
+            response = json.loads(response)
+            if response["success"] and response["message"] == "触发获取群二维码成功":
+                msg_id = response["data"]["data"]
+                from wxmsg import MessageDB
+
+                with MessageDB() as msgdb:
+                    for _ in range(10):
+                        sleep(3)
+                        msg = msgdb.select(msg_id)
+                        if msg:
+                            return msg[8]
+            else:
+                return ""
+        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            self.LOG.error(f"解析群二维码失败: {e}, 响应内容: {response}")
+            return ""
+    
+    def group_manage(self, roomid, wxids, type=0):
+        """
+        群管理
+        Args:
+            roomid: 群id
+            wxid: 要管理的wxid
+            type: 3为踢人 2为加人
+        Returns:
+            dict: 包含所有联系人信息的字典
+        """
+        data={
+                "chat_room_id": roomid,
+                "op_type": type,
+                "content": wxids,
+        }
+        return self._make_request("manage_group_members.html", data)
+
+
+def down_file(msg_id, dst_path=""):
+    """下载文件"""
+    c = Client()
+    res = c.down_file(msg_id)
+    if not res:
+        return ""
+    if not dst_path:
+        return res
+    with open(dst_path, "wb") as f:
+        r = requests.get(res)
+        f.write(r.content)
+        return dst_path
 
 
 if __name__ == "__main__":

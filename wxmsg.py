@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+import time
 import re
 import sqlite3
 from models.manage.member import Member
@@ -61,35 +62,41 @@ class WxMsg:
         # 确保输入是处理过的字典
         if isinstance(msg, dict):
             msg = filter_msg(msg)
-        self.formate_msg(msg)
+        type = msg.get("type", "")
+        if type == "callback":
+            self.event_callback(msg)
+        else:
+            self.formate_msg(msg)
 
     def formate_msg(self, msg):
-        # 使用字典的get方法替代getattr
-        if isinstance(msg, dict):
-            self.wxid = msg.get("wechatid", "")
-            self.roomid = msg.get("friendid", "")
-            self.is_self = True if msg.get("issend", "false") == "true" else False
-            self.is_group = 1 if "@chatroom" in self.roomid else 0
-            self.content = msg.get("content", "")
-            self.type = msg.get("contenttype", 0)
-            self.msg_id = msg.get("msgsvrid", "")
-            self.create_time = msg.get("createTime", 0)
-            self.ext = msg.get("ext", "")
-        else:
-            # 如果不是字典，尝试使用属性访问（兼容旧代码）
-            self.wxid = getattr(msg, "wechatid", "")
-            self.roomid = getattr(msg, "friendid", "")
-            self.is_self = True if getattr(msg, "issend", "false") == "true" else False
-            self.is_group = 1 if "@chatroom" in self.roomid else 0
-            self.content = getattr(msg, "content", "")
-            self.type = getattr(msg, "contenttype", 0)
-            self.msg_id = getattr(msg, "msgsvrid", "")
-            self.create_time = getattr(msg, "createTime", 0)
-            self.ext = getattr(msg, "ext", "")
-
+        self.wxid = msg.get("wechatid", "")
+        self.roomid = msg.get("friendid", "")
+        self.is_self = True if msg.get("issend", "false") == "true" else False
+        self.is_group = 1 if "@chatroom" in self.roomid else 0
+        self.content = msg.get("content", "")
+        self.type = msg.get("contenttype", 0)
+        self.msg_id = msg.get("msgsvrid", "")
+        self.create_time = msg.get("createTime", 0)
+        self.ext = msg.get("ext", "")
         self.thumb = ""
         self.is_at = self._is_at()
         self.parse_content()
+
+    def event_callback(self, msg):
+        """事件回调"""
+        self.wxid = msg.get("wxId", "")
+        self.is_self = True
+        self.is_group = 1
+        self.content = msg.get("eventType", "")
+        self.type = msg.get("type", "")
+        self.create_time = time.time() * 1000
+        self.is_at = False
+        bizContent = msg.get("bizContent", "")
+        self.ext = bizContent.get("QrCodeUrl", "")
+        self.msg_id = bizContent.get("TaskId", "")
+        self.roomid = bizContent.get("ChatRoomId", "")
+        self.sender = bizContent.get("ChatRoomId", "")
+        self.thumb = ""
 
     def parse_content(self):
         """解析消息内容"""

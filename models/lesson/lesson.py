@@ -15,7 +15,8 @@ import pandas as pd
 import requests
 from config.config import Config
 from config.log import LogConfig
-from sendqueue import send_text, send_image, send_file
+from sendqueue import send_text, send_image, send_file, send_app_msg
+from client import down_file
 from models.manage.member import Member, check_permission
 
 log = LogConfig().get_logger()
@@ -74,12 +75,12 @@ class Lesson:
         self._excel_cache = {}
         # 为不同类型的缓存设置不同的TTL
         self._cache_config = {
-            "teacher_template": {"ttl": 7200, "last_update": None},  # 2小时
-            "class_template": {"ttl": 7200, "last_update": None},
-            "time_table": {"ttl": 86400, "last_update": None},  # 24小时
-            "ip_info": {"ttl": 3600, "last_update": None},  # 1小时
-            "contacts": {"ttl": 1800, "last_update": None},  # 30分钟
-            "schedule_file": {"ttl": 300, "last_update": None},  # 5分钟
+            "teacher_template": {"ttl": 60*60*24*3, "last_update": None},  # 3天
+            "class_template": {"ttl": 60*60*24*30, "last_update": None},
+            "time_table": {"ttl": 60*60*24*30, "last_update": None}, 
+            "ip_info": {"ttl": 60*60*24*30, "last_update": None}, 
+            "contacts": {"ttl": 60*60*24*30, "last_update": None},
+            "schedule_file": {"ttl": 60*30, "last_update": None},  
         }
         # 错误消息常量
         self.ERROR_MESSAGES = {
@@ -123,7 +124,7 @@ class Lesson:
         try:
             self.current_month = self.month_info()
             self.week_info = self.get_week_info()
-            self.week_next = self.get_week_next()
+            self.week_next = self.get_week_info(next_week=True)
             self._class_template_cache = self._load_class_template()
             self._current_schedule_file = self.current_schedule_file(week_next=False)
             self._time_table_cache = self._load_time_table()
@@ -326,7 +327,7 @@ class Lesson:
         """返回当前月份：202412"""
         return datetime.now().strftime("%Y%m")
 
-    def get_week_info(self) -> list:
+    def get_week_info(self, next_week=False) -> list:
         """
         获取当前周的周信息[16, '20241216', 1734278400, 1734883199]
         """
@@ -334,35 +335,20 @@ class Lesson:
         current_date = datetime.now()
         current_date = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
         # 获取当前周数
-        current_week_number = current_date.isocalendar()[1] + self.week_change
-        # 获取当前周的周一日期
-        monday_date = current_date - timedelta(days=current_date.weekday())
+        week_number = current_date.isocalendar()[1] + self.week_change
+        if next_week:
+            week_number += 1
+            monday_date = (
+            current_date + timedelta(days=7) - timedelta(days=current_date.weekday())
+        )
+        else:
+            monday_date = (
+                current_date - timedelta(days=current_date.weekday())
+            )
         monday = monday_date.strftime("%Y%m%d")
         monday_timestamp = int(monday_date.timestamp())
         sunday_timestamp = int((monday_date + timedelta(days=7)).timestamp()) - 1
-        return [current_week_number, monday, monday_timestamp, sunday_timestamp]
-
-    def get_week_next(self) -> list:
-        """
-        获取下周的周信息[16, '20241216', 1734278400, 1734883199]
-        """
-        current_date = datetime.now()
-        current_date = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        next_week_number = current_date.isocalendar()[1] + self.week_change + 1
-        next_monday_date = (
-            current_date + timedelta(days=7) - timedelta(days=current_date.weekday())
-        )
-        next_monday = next_monday_date.strftime("%Y%m%d")
-        next_monday_timestamp = int(next_monday_date.timestamp())
-        next_sunday_timestamp = (
-            int((next_monday_date + timedelta(days=7)).timestamp()) - 1
-        )
-        return [
-            next_week_number,
-            next_monday,
-            next_monday_timestamp,
-            next_sunday_timestamp,
-        ]
+        return [week_number, monday, monday_timestamp, sunday_timestamp]
 
     # ---------- 文件（夹）操作 ----------
     def create_c_month_dir(self):
@@ -491,6 +477,7 @@ class Lesson:
         """
         生成周课表,正确返回1,错误返回0
         """
+        yield 0
         schedule_data = self._get_schedule_data(week_next)
         if schedule_data is None:
             return 0
@@ -665,7 +652,7 @@ class Lesson:
         # 格式化课表
         df_schedule = self.format_schedule(df_schedule, week_next, ignore)
 
-        if not teacher_flag:
+        if self.class_template is None:
             return df_schedule
 
         # 读取科目-老师对应关系
@@ -677,7 +664,10 @@ class Lesson:
         subject_to_teacher = {}
         for _, row in subject_teacher.iterrows():
             for subj in row["subject"].split("/"):
-                subject_to_teacher[subj.strip()] = row["name"]
+                if teacher_flag:
+                    subject_to_teacher[subj.strip()] = row["name"]
+                else:
+                    subject_to_teacher[subj.strip()] = subj[:2]
 
         # 定义替换函数
         def replace_with_teacher(x):
@@ -688,7 +678,7 @@ class Lesson:
         # 应用替换
         return df_schedule.map(replace_with_teacher)
 
-    def update_schedule(self, id: int, title: str, xml_content: str) -> int:
+    def update_schedule(self, id: int, title: str, msg_id: str) -> int:
         """
         更新课表
         返回值：
@@ -745,8 +735,7 @@ class Lesson:
                 new_schedule = f"课表{title}-{int(time.time())}.xlsx"
                 new_schedule_file = os.path.join(schedule_dir, new_schedule)
                 # 下载新课表到指定位置 class_schedule
-                p = IPad()
-                response_path = p.down_file(xml_content, new_schedule_file, True)
+                response_path = down_file(msg_id, new_schedule_file)
                 if not response_path:
                     log.error(f"更新课表失败，无法下载到 {new_schedule_file}")
                     self.notify_admins(f"更新课表失败，无法下载到 {new_schedule_file}")
@@ -934,39 +923,45 @@ class Lesson:
             log.error(error_msg)
             return error_msg
 
-    def sorted_schedule_file(self, schedule_dir: str, monday: str) -> list:
+    @staticmethod
+    def sorted_schedule_file(path: str, monday: str) -> list:
         """
-        获取排序后的课表文件列表，按照文件名中的日期排序
+        获取排序后的课表文件列表
 
         Args:
-            schedule_dir: 课表目录
-            monday: 周一日期字符串，格式为'YYYYMMDD'
+            path: 课表文件目录
+            monday: 周一日期
 
         Returns:
             list: 排序后的课表文件列表
         """
-        if not os.path.exists(schedule_dir):
-            log.error(f"课表目录不存在: {schedule_dir}")
-            return []
-
         try:
-            # 获取目录中所有文件
-            files = os.listdir(schedule_dir)
-            # 过滤出课表文件
+            # 预编译正则表达式模式
+            timestamp_pattern = re.compile(r'-(\d+)')
+
+            # 使用列表推导式过滤文件
             schedule_files = [
-                f for f in files if f.startswith("课表") and f.endswith(".xlsx")
+                s for s in os.listdir(path)
+                if monday in s
             ]
 
-            # 如果有精确匹配的文件，直接返回
-            exact_match = [f for f in schedule_files if monday in f]
-            if exact_match:
-                return exact_match
+            if not schedule_files:
+                return []
 
-            # 否则按照文件名中的日期排序
-            schedule_files.sort(reverse=True)
-            return schedule_files
+            def extract_timestamp(filename: str) -> int:
+                """从文件名中提取时间戳"""
+                match = timestamp_pattern.search(filename)
+                return int(match.group(1)) if match else 0
+
+            # 使用key函数优化排序
+            return sorted(
+                schedule_files,
+                key=extract_timestamp,
+                reverse=True
+            )
+
         except Exception as e:
-            log.error(f"获取课表文件列表失败: {str(e)}")
+            log.error(f"排序课表文件失败: {str(e)}")
             return []
 
     # TODO: 优化返回的数据，只通知老师 调课的日期和班级
@@ -1274,107 +1269,45 @@ async def create_month_dir():
         return False
 
 
-async def modify_file_template_config():
-    """
-    每周1号，将下周课表的模板内容修改为本周课表
-    """
-    next_week_content = Config().get_config("下周课表", "file_template.yaml")["xml"]
-    if next_week_content == "":
-        return False
-    modify_file_template("当前课表", next_week_content)
-    modify_file_template("下周课表", "")
-    log.info(f"修改文件模板成功")
-    return True
-
-
-def modify_file_template(key: str, xml_content: str) -> int:
-    """
-    保存xml_content到文件
-    返回值：
-        0：保存失败
-        1：保存成功
-    """
-    values = Config().get_config_all("file_template.yaml")
-    try:
-        value = values[key]
-        value["xml"] = xml_content
-        if Config().modify_config(key, value, "file_template.yaml"):
-            return 1
-    except:
-        return 0
-
-
 async def update_schedule(record: any):
     content = record.content
-    title = re.match(r"^\[文件\] <课表(\d{8}.*)\.xlsx>$", content).group(1)
+    title = re.match(r"^\[文件\] 课表(\d{8}.*)\.xlsx$", content).group(1)
     if title:
         l = Lesson()
-        result = l.update_schedule(record.msg_id, title, record.xml)
-        xml_content = base64.b64encode(record.xml.encode("utf-8"))
+        result = l.update_schedule(record.msg_id, title, record.msg_id)
         if result == 1:
-            file_modify = modify_file_template("当前课表", xml_content)
-            if file_modify == 1:
-                tips = "当前课表xml文件修改成功"
-            else:
-                tips = "当前课表xml文件修改失败"
             # '通知所有老师本周课表变动'
             for a in l.admin:
-                send_text(f"{tips}", a)
                 send_text(f"更新所有人的课表", a)
         elif result == 10:
-            file_modify = modify_file_template("下周课表", xml_content)
-            if file_modify == 1:
-                tips = "下周课表xml文件修改成功"
-            else:
-                tips = "下周课表xml文件修改失败"
             # '通知所有老师下周课表变动'
             for a in l.admin:
-                send_text(f"{tips}", a)
                 send_text(f"更新下周的课表", a)
         elif result == 5:
-            file_modify = modify_file_template("当前课表", xml_content)
-            if file_modify == 1:
-                tips = "当前课表xml文件修改成功"
-            else:
-                tips = "当前课表xml文件修改失败"
-            for a in l.admin:
-                send_text(f"{tips}", a)
             teachers = []
             # '通知相关老师课表变动'
             diffs = l.schedule_diff()
             if diffs != ([], []):
+                task = []
                 class_diff = diffs[0]
                 teachers_diff = diffs[1]
-                flag = 1
                 for k in class_diff:
                     class_df = l.get_class_schedule(k)
                     title = f"{k}的课表"
-                    class_pic = l.df_to_png(
-                        class_df, f"class_{str(flag)}.png", title=title
-                    )[0]
-                    flag += 1
-                    wxids = l.get_wxids(k)
                     teachers.append(k)
-                    for wxid in wxids:
-                        send_text(f"你们班：有调课请注意查看！", wxid)
-                        if class_pic:
-                            pic_path = class_pic[len(l.lesson_dir) :].replace("\\", "/")
-                            send_image(pic_path, wxid, "lesson")
+                    if not class_df.empty:
+                        task.append(process_and_send_class_image(l, class_df, f"{k}.png", title, k, 'lesson', True))
                 for k in teachers_diff:
                     teacher_df = l.get_teacher_schedule(k)
                     title = f"{k}的课表"
                     wxids = l.get_wxids(k)
                     teachers.append(k)
+
                     for wxid in wxids:
-                        send_text(f"你的课有调整，请注意查看！", wxid)
-                        teacher_pic = l.df_to_png(
-                            teacher_df, f"{wxid}.png", title=title
-                        )[0]
-                        if teacher_pic:
-                            pic_path = teacher_pic[len(l.lesson_dir) :].replace(
-                                "\\", "/"
-                            )
-                            send_image(pic_path, wxid, "lesson")
+                        task.append(process_and_send_image(l, teacher_df, f"{wxid}.png", title, wxid, 'lesson', True))
+                if task:
+                    import asyncio
+                    await asyncio.gather(*task)
                 teachers = set(teachers)
                 tips = "微调课表已通知以下老师:"
                 for teacher in teachers:
@@ -1470,7 +1403,7 @@ async def update_schedule_all(record: any):
         await asyncio.gather(*tasks)
 
 
-async def process_and_send_image(lesson, df, png_name, title, wxid, producer):
+async def process_and_send_image(lesson, df, png_name, title, wxid, producer, tips=False):
     """
     异步处理图片生成和发送
     """
@@ -1486,11 +1419,13 @@ async def process_and_send_image(lesson, df, png_name, title, wxid, producer):
         if df_png:
             pic_path = df_png[0][len(lesson.lesson_dir) :].replace("\\", "/")
             # 发送图片
+            if tips:
+                send_text(f"你的课有调整，请注意查看！", wxid)
             send_image(pic_path, wxid, producer)
 
 
 async def process_and_send_class_image(
-    lesson, class_df, png_name, title, class_name, producer
+    lesson, class_df, png_name, title, class_name, producer, tips=False
 ):
     """
     异步处理班级图片生成和发送给多个接收者
@@ -1507,6 +1442,8 @@ async def process_and_send_class_image(
             pic_path = class_pic[0][len(lesson.lesson_dir) :].replace("\\", "/")
             wxids = lesson.get_wxids(class_name)
             for wxid in wxids:
+                if tips:
+                    send_text(f"你们班：有调课请注意查看！", wxid)
                 send_image(pic_path, wxid, producer)
 
 
@@ -1795,15 +1732,13 @@ def group_send(xlsx_file, sender):
 async def mass_message(record: any):
     l = Lesson()
     content = record.content
-    title = re.match(r"^\[文件\] <((学发|教发)群发通知\d*\.xlsx)>$", content).group(1)
+    title = re.match(r"^\[文件\] ((学发|教发)群发通知\d*\.xlsx)$", content).group(1)
     if title:
         title = title.split(".")[0]
         title = re.sub(r"\d+", "", title)
         notice_file = f'{title}-{time.strftime("%Y%m%d%H%M%S", time.localtime())}.xlsx'
         new_notice_file = os.path.join(l.lesson_dir, "notice", notice_file)
-        xml_content = record.xml
-        p = IPad()
-        response_path = p.down_file(xml_content, new_notice_file, rename=True)
+        response_path = down_file(record.msg_id, new_notice_file)
         if response_path == "":
             send_text("通知文件下载失败，请重新发送该文件！", record.roomid)
             return
@@ -1844,13 +1779,16 @@ async def sunday_record(record: any):
         send_text("请先配置 周日值班记录 模板", record.roomid)
         return 0
     content = record.content
-    receives = content.split("--")[1].split("+")
-    ipad = IPad()
+    receives = content.split("-")[1].split("+")
     l = Lesson()
     for receive in receives:
-        wxid = l.get_wxids(receive)[0]
-        ipad.send_app(app_xml, wxid)
-        time.sleep(3)
+        try:
+            wxid = l.get_wxids(receive)[0]
+            send_app_msg(app_xml, wxid)
+            time.sleep(3)
+        except Exception as e:
+            log.error(f"发送失败：{str(e)}")
+            send_text(f"发送失败：{str(e)}", record.roomid)
     return 1
 
 

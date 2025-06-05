@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 import random
 from sendqueue import QueueDB, send_text
 from models.task import task_start
+from models.manage.manage import forward_msg
 
 log = LogConfig().get_logger()
 config = Config()
@@ -56,7 +57,6 @@ app = FastAPI(lifespan=lifespan)
 # 配置静态文件目录
 # 确保static目录存在
 static_dir = config.get_config("lesson_dir")
-print(static_dir)
 # 挂载静态文件目录
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
@@ -69,21 +69,22 @@ async def root(request: Request):
     with MessageDB() as db:
         db.insert(msg.__to_dict__())
     log.info(msg.__str__())
+    
+    if not msg.is_self:
+        forward_msg(msg.__to_dict__())
+        reply, func, msg = trigger(msg)
+        if reply:
+            if len(msg.content)<50:
+                aters = msg.sender if msg.is_group else ""
+                send_text(reply, msg.roomid, aters)
 
-    reply, func, msg = trigger(msg)
-
-    if reply:
-        if len(msg.content)<50:
-            aters = msg.sender if msg.is_group else ""
-            send_text(reply, msg.roomid, aters)
-
-    if func:
-        trigger_func = getattr(models, func)
-        if trigger_func:
-            log.info(f"触发函数 {func}")
-            asyncio.create_task(trigger_func(msg))
-        else:
-            log.warning(f"未找到函数 {func}, 请检查配置")
+        if func:
+            trigger_func = getattr(models, func)
+            if trigger_func:
+                log.info(f"触发函数 {func}")
+                asyncio.create_task(trigger_func(msg))
+            else:
+                log.warning(f"未找到函数 {func}, 请检查配置")
 
 
 def trigger(msg):

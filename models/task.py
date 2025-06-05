@@ -15,7 +15,9 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from sendqueue import send_text
 from config.log import LogConfig
-from models.api import ZPAI
+from models.api import ZPAI, gk_countdown
+from models.parking import watching_parking
+from models.lesson.lesson import refresh_schedule, today_teachers, create_month_dir
 
 
 def parse_datetime(date_str):
@@ -172,7 +174,10 @@ class Task:
 
     def remove_task(self, job_id):
         self.scheduler.remove_job(job_id)
-        del self.job_args[job_id]
+        try:
+            del self.job_args[job_id]
+        except:
+            pass
         return True
 
     async def start(self):
@@ -277,7 +282,12 @@ async def get_task_list(record):
 
 async def stop_task(record):
     content = record.content
-    job_id = re.match(r"^停止任务-(.*)", content).group(1)
+    match = re.match(r"^\-任务-(.*)", content)
+    if not match:
+        send_text("无效的任务ID格式，请使用'停止任务-{任务ID}'的格式", record.roomid)
+        return
+
+    job_id = match.group(1)
     tips = task_scheduler.remove_task(job_id)
     send_text(f"任务 {job_id} 已{'停止' if tips else '停止失败'}", record.roomid)
 
@@ -285,7 +295,7 @@ async def stop_task(record):
 async def add_cron_remind(record):
     # TODO: 根据 提醒的 人员 添加 人员的单独提醒， ai_renmind_text 返回list，遍历list实现
     content = record.content
-    if '提醒' not in content:
+    if "提醒" not in content:
         return
     zp = ZPAI()
     r = zp.ai_remind_text(content).split("-")
@@ -436,22 +446,6 @@ def init_default_tasks():
     )
 
 
-def today_teachers():
-    print("今日教师")
-
-
-def gk_countdown():
-    print("高考倒计时")
-
-
-def create_month_dir():
-    print("创建月份目录")
-
-
-def watching_parking():
-    print("监控停车场")
-
-
 # 在load_tasks_from_db函数之前添加以下函数
 def task_wrapper(func, task_id):
     """
@@ -480,6 +474,8 @@ def load_tasks_from_db():
         "today_teachers": today_teachers,
         "watching_parking": watching_parking,
         "random_daily_task": task_scheduler.random_daily_task,
+        "refresh_schedule": refresh_schedule,
+        "create_month_dir": create_month_dir,
     }
 
     # 从数据库获取所有启用的任务

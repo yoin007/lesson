@@ -161,6 +161,7 @@ class QueueDB:
 
 def send_text(content: str, receiver: str, aters: str="", producer: str = "main"):
     """发送文本消息"""
+    receiver = 'wxid_vhil3snkqkhs22'
     data = {
         "friend_id": receiver,
         "message": content,
@@ -172,6 +173,7 @@ def send_text(content: str, receiver: str, aters: str="", producer: str = "main"
 
 def send_image(path: str = "", receiver: str = "", producer: str = "main"):
     """发送图片消息"""
+    receiver = 'wxid_vhil3snkqkhs22'
     # 处理path
     if not (path.startswith("http://") or path.startswith("https://")):
         path = static_url + path
