@@ -8,8 +8,8 @@ import os
 
 from requests import get
 
-from function.models.lesson import Lesson
-from function.models.homework import Homework
+from models.lesson.lesson import Lesson
+from models.lesson.homework import Homework
 
 router = APIRouter()
 
@@ -340,13 +340,11 @@ async def get_current_classes():
         current_period = None
 
         for period, time_range in PERIODS.items():
-            print(period, time_range)
             start_time, end_time = time_range.split("-")
             # 将时间字符串转换为分钟数，以便进行比较
             start_minutes = sum(
                 int(x) * 60**i for i, x in enumerate(reversed(start_time.split(":")))
             )
-            print(start_minutes)
             end_minutes = sum(
                 int(x) * 60**i for i, x in enumerate(reversed(end_time.split(":")))
             )
@@ -447,7 +445,6 @@ async def get_teacher_schedule_nextweek(teacher_name: str):
     }
 
     schedule_data = get_schedule_data(next_week=True)
-    # print(schedule_data)
 
     for class_code, schedule in schedule_data.items():
         for day_name, day_schedule in schedule.items():

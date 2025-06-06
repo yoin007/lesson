@@ -7,6 +7,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 import models
 import re
 import os
@@ -20,6 +21,7 @@ import random
 from sendqueue import QueueDB, send_text
 from models.task import task_start
 from models.manage.manage import forward_msg
+from models.lesson import datas_api
 
 log = LogConfig().get_logger()
 config = Config()
@@ -54,6 +56,30 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# 配置CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 允许所有源，生产环境中应该设置具体的域名
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 注册路由
+app.include_router(datas_api.router, prefix="/api")
+
+
+# @app.get("/api/")
+# async def root():
+#     return {"message": "Welcome to Class Data Display System API"}
+
+
+# 添加健康检查端点
+@app.get("/api/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
 # 配置静态文件目录
 # 确保static目录存在
 static_dir = config.get_config("lesson_dir")
@@ -69,12 +95,12 @@ async def root(request: Request):
     with MessageDB() as db:
         db.insert(msg.__to_dict__())
     log.info(msg.__str__())
-    
+
     if not msg.is_self:
         forward_msg(msg.__to_dict__())
         reply, func, msg = trigger(msg)
         if reply:
-            if len(msg.content)<50:
+            if len(msg.content) < 50:
                 aters = msg.sender if msg.is_group else ""
                 send_text(reply, msg.roomid, aters)
 
@@ -123,7 +149,7 @@ def trigger(msg):
                     continue
                 if row["ai_flag"]:
                     msg.content = ai_content(msg.content, row["keywords"])
-                if row['whitelist'] != ["all"] and msg.roomid in row["whitelist"]:
+                if row["whitelist"] != ["all"] and msg.roomid in row["whitelist"]:
                     if not re.search(row["pattern"], msg.content, re.DOTALL):
                         continue
                     return row["reply"], row["func"], msg
