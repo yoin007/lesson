@@ -4,3 +4,4 @@ from models.lesson.lesson import *
 from models.lesson.notes import *
 from models.lesson.homework import *
 from models.manage.manage import *
+from models.push_brach import push_qrcode, change_roomid

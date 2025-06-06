@@ -18,6 +18,7 @@ from config.log import LogConfig
 from models.api import ZPAI, gk_countdown
 from models.parking import watching_parking
 from models.lesson.lesson import refresh_schedule, today_teachers, create_month_dir
+from models.push_brach import push_qrcode
 
 
 def parse_datetime(date_str):
@@ -476,6 +477,7 @@ def load_tasks_from_db():
         "random_daily_task": task_scheduler.random_daily_task,
         "refresh_schedule": refresh_schedule,
         "create_month_dir": create_month_dir,
+        "push_qrcode": push_qrcode,
     }
 
     # 从数据库获取所有启用的任务
