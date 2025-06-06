@@ -478,6 +478,7 @@ def load_tasks_from_db():
         "refresh_schedule": refresh_schedule,
         "create_month_dir": create_month_dir,
         "push_qrcode": push_qrcode,
+        "clear_temp_file": clear_temp_file,
     }
 
     # 从数据库获取所有启用的任务

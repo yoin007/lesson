@@ -75,12 +75,12 @@ class Lesson:
         self._excel_cache = {}
         # 为不同类型的缓存设置不同的TTL
         self._cache_config = {
-            "teacher_template": {"ttl": 60*60*24*3, "last_update": None},  # 3天
-            "class_template": {"ttl": 60*60*24*30, "last_update": None},
-            "time_table": {"ttl": 60*60*24*30, "last_update": None}, 
-            "ip_info": {"ttl": 60*60*24*30, "last_update": None}, 
-            "contacts": {"ttl": 60*60*24*30, "last_update": None},
-            "schedule_file": {"ttl": 60*30, "last_update": None},  
+            "teacher_template": {"ttl": 60 * 60 * 24 * 3, "last_update": None},  # 3天
+            "class_template": {"ttl": 60 * 60 * 24 * 30, "last_update": None},
+            "time_table": {"ttl": 60 * 60 * 24 * 30, "last_update": None},
+            "ip_info": {"ttl": 60 * 60 * 24 * 30, "last_update": None},
+            "contacts": {"ttl": 60 * 60 * 24 * 30, "last_update": None},
+            "schedule_file": {"ttl": 60 * 30, "last_update": None},
         }
         # 错误消息常量
         self.ERROR_MESSAGES = {
@@ -339,12 +339,12 @@ class Lesson:
         if next_week:
             week_number += 1
             monday_date = (
-            current_date + timedelta(days=7) - timedelta(days=current_date.weekday())
-        )
-        else:
-            monday_date = (
-                current_date - timedelta(days=current_date.weekday())
+                current_date
+                + timedelta(days=7)
+                - timedelta(days=current_date.weekday())
             )
+        else:
+            monday_date = current_date - timedelta(days=current_date.weekday())
         monday = monday_date.strftime("%Y%m%d")
         monday_timestamp = int(monday_date.timestamp())
         sunday_timestamp = int((monday_date + timedelta(days=7)).timestamp()) - 1
@@ -459,6 +459,20 @@ class Lesson:
             return self._handle_file_error(
                 "移动文件", str(e), source_path, destination_path
             )
+
+    def clear_temp_file(self):
+        """清除临时文件"""
+        temp_dir = os.path.join(self.lesson_dir, "temp")
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+            log.info(f"已删除临时文件夹: {temp_dir}")
+            time.sleep(1)
+            os.makedirs(temp_dir, exist_ok=True)
+            log.info(f"已创建临时文件夹: {temp_dir}")
+            self.notify_admins(f"已删除临时文件夹: {temp_dir}")
+        else:
+            log.info(f"临时文件夹不存在: {temp_dir}")
+            self.notify_admins(f"临时文件夹不存在: {temp_dir}")
 
     def _get_schedule_data(self, week_next=False):
         """获取课表数据的通用方法"""
@@ -937,13 +951,10 @@ class Lesson:
         """
         try:
             # 预编译正则表达式模式
-            timestamp_pattern = re.compile(r'-(\d+)')
+            timestamp_pattern = re.compile(r"-(\d+)")
 
             # 使用列表推导式过滤文件
-            schedule_files = [
-                s for s in os.listdir(path)
-                if monday in s
-            ]
+            schedule_files = [s for s in os.listdir(path) if monday in s]
 
             if not schedule_files:
                 return []
@@ -954,11 +965,7 @@ class Lesson:
                 return int(match.group(1)) if match else 0
 
             # 使用key函数优化排序
-            return sorted(
-                schedule_files,
-                key=extract_timestamp,
-                reverse=True
-            )
+            return sorted(schedule_files, key=extract_timestamp, reverse=True)
 
         except Exception as e:
             log.error(f"排序课表文件失败: {str(e)}")
@@ -1222,6 +1229,11 @@ class Lesson:
         return current_classes
 
 
+def clear_temp_file():
+    l = Lesson()
+    l.clear_temp_file()
+
+
 async def create_month_dir():
     """
     每个月的1号，将上个月的课表复制到 新月份 的目录下
@@ -1296,7 +1308,11 @@ async def update_schedule(record: any):
                     title = f"{k}的课表"
                     teachers.append(k)
                     if not class_df.empty:
-                        task.append(process_and_send_class_image(l, class_df, f"{k}.png", title, k, 'lesson', True))
+                        task.append(
+                            process_and_send_class_image(
+                                l, class_df, f"{k}.png", title, k, "lesson", True
+                            )
+                        )
                 for k in teachers_diff:
                     teacher_df = l.get_teacher_schedule(k)
                     title = f"{k}的课表"
@@ -1304,9 +1320,20 @@ async def update_schedule(record: any):
                     teachers.append(k)
 
                     for wxid in wxids:
-                        task.append(process_and_send_image(l, teacher_df, f"{wxid}.png", title, wxid, 'lesson', True))
+                        task.append(
+                            process_and_send_image(
+                                l,
+                                teacher_df,
+                                f"{wxid}.png",
+                                title,
+                                wxid,
+                                "lesson",
+                                True,
+                            )
+                        )
                 if task:
                     import asyncio
+
                     await asyncio.gather(*task)
                 teachers = set(teachers)
                 tips = "微调课表已通知以下老师:"
@@ -1403,7 +1430,9 @@ async def update_schedule_all(record: any):
         await asyncio.gather(*tasks)
 
 
-async def process_and_send_image(lesson, df, png_name, title, wxid, producer, tips=False):
+async def process_and_send_image(
+    lesson, df, png_name, title, wxid, producer, tips=False
+):
     """
     异步处理图片生成和发送
     """
