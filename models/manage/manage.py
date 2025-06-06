@@ -9,6 +9,7 @@ from models.api import ju_pai
 import json
 import requests
 from time import sleep
+from client import Client
 
 
 def forward_msg(msg):
@@ -16,10 +17,7 @@ def forward_msg(msg):
     if not urls or len(urls) == 0:
         return
     payload = json.dumps(msg)
-    headers = {
-        'User-Agent': 'tech_t',
-        'Content-Type': 'application/json'
-    }
+    headers = {"User-Agent": "tech_t", "Content-Type": "application/json"}
     for url in urls:
         try:
             response = requests.request("POST", url, headers=headers, data=payload)
@@ -28,6 +26,7 @@ def forward_msg(msg):
         except:
             pass
         sleep(1)
+
 
 async def command_manul(record):
     """
@@ -88,9 +87,11 @@ async def invite_chatroom_member(record: any):
     """
     text = record.content.replace("#", "").replace(" ", "")
     invite_rooms = Config().get_config("invite_rooms")
+    chatrooms = Config().get_config("qrcode_git")
     try:
-        img = invite_rooms[text]
-        send_image(img, record.roomid, "manage")
+        roomid = chatrooms[invite_rooms[text]]
+        c = Client()
+        c.group_manage(roomid, record.sender, 2)
         return True
     except:
         return False

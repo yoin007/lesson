@@ -17,7 +17,12 @@ from sendqueue import send_text
 from config.log import LogConfig
 from models.api import ZPAI, gk_countdown
 from models.parking import watching_parking
-from models.lesson.lesson import refresh_schedule, today_teachers, create_month_dir
+from models.lesson.lesson import (
+    refresh_schedule,
+    today_teachers,
+    create_month_dir,
+    clear_temp_file,
+)
 from models.push_brach import push_qrcode
 
 
