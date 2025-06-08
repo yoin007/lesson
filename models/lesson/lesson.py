@@ -756,7 +756,8 @@ class Lesson:
                     return UPDATE_FAILED
 
                 # 检查新课表是否正确
-                new_path = os.path.normpath(new_schedule_file)
+                new_path = os.path.normpath(new_schedule_file).replace('\\', '/')
+                response_path = os.path.normpath(response_path).replace('\\', '/')
                 log.info(f"下载的课表文件：{response_path}, 新课表文件：{new_path}")
                 if response_path == new_path:
                     if return_flag == 10:
