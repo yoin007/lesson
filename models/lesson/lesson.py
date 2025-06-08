@@ -13,6 +13,7 @@ from html2image import Html2Image
 
 import pandas as pd
 import requests
+from functools import lru_cache
 from config.config import Config
 from config.log import LogConfig
 from sendqueue import send_text, send_image, send_file, send_app_msg
@@ -71,8 +72,6 @@ class Lesson:
             "week_pattern": re.compile(r"第(\d+)周"),
             "date_pattern": re.compile(r"\d{4}-\d{2}-\d{2}"),
         }
-        # Excel文件缓存
-        self._excel_cache = {}
         # 为不同类型的缓存设置不同的TTL
         self._cache_config = {
             "teacher_template": {"ttl": 60 * 60 * 24 * 3, "last_update": None},  # 3天
@@ -80,7 +79,6 @@ class Lesson:
             "time_table": {"ttl": 60 * 60 * 24 * 30, "last_update": None},
             "ip_info": {"ttl": 60 * 60 * 24 * 30, "last_update": None},
             "contacts": {"ttl": 60 * 60 * 24 * 30, "last_update": None},
-            "schedule_file": {"ttl": 60 * 30, "last_update": None},
         }
         # 错误消息常量
         self.ERROR_MESSAGES = {
@@ -148,22 +146,13 @@ class Lesson:
         if cache_type in self._cache_config:
             self._cache_config[cache_type]["last_update"] = time.time()
 
+    @lru_cache(maxsize=None)
     def _read_excel_with_cache(self, file_path, sheet_name=0, **kwargs):
-        """带缓存的Excel读取"""
-        cache_key = f"{file_path}_{sheet_name}_{hash(str(kwargs))}"
+        """使用 lru_cache + 文件修改时间感知的缓存"""
         file_mtime = os.path.getmtime(file_path)
-
-        if cache_key in self._excel_cache:
-            cached_data, cached_mtime = self._excel_cache[cache_key]
-            if cached_mtime >= file_mtime:
-                return cached_data
-
-        # 读取文件并缓存
-        data = pd.read_excel(
-            file_path, sheet_name=sheet_name, engine="openpyxl", **kwargs
-        )
-        self._excel_cache[cache_key] = (data, file_mtime)
-        return data
+        kwargs_str = str(sorted(kwargs.items()))  # 确保 kwargs 可哈希
+        cache_key = (file_path, file_mtime, sheet_name, kwargs_str)
+        return pd.read_excel(file_path, sheet_name=sheet_name, engine="openpyxl", **kwargs)
 
     @error_handler
     def _load_excel_file(
@@ -536,24 +525,19 @@ class Lesson:
         """
         获取当前(下周)课表文件路径,返回str
         """
-        if (
-            self._should_refresh_cache("schedule_file")
-            or self._current_schedule_file is None
-        ):
-            schedule_dir = os.path.join(
-                self.lesson_dir, self.current_month, "class_schedule"
-            )
-            if week_next:
-                monday = self.week_next[1]
-            else:
-                monday = self.week_info[1]
-            schedule_file_sorted = self.sorted_schedule_file(schedule_dir, monday)
-            if len(schedule_file_sorted) == 0:
-                return ""
-            self._current_schedule_file = os.path.join(
-                schedule_dir, schedule_file_sorted[0]
-            )
-            self._update_cache_timestamp("schedule_file")
+        schedule_dir = os.path.join(
+            self.lesson_dir, self.current_month, "class_schedule"
+        )
+        if week_next:
+            monday = self.week_next[1]
+        else:
+            monday = self.week_info[1]
+        schedule_file_sorted = self.sorted_schedule_file(schedule_dir, monday)
+        if len(schedule_file_sorted) == 0:
+            return ""
+        self._current_schedule_file = os.path.join(
+            schedule_dir, schedule_file_sorted[0]
+        )
         return self._current_schedule_file
 
     def format_schedule(
