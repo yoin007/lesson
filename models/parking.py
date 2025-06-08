@@ -57,7 +57,7 @@ async def get_parking_records(record):
 record_list = []
 
 
-async def watching_parking():
+def watching_parking():
     # send_text = print
     global record_list
     try:
@@ -86,11 +86,11 @@ async def watching_parking():
             # 如果是第一次运行，初始化record_list并发送通知
             if not record_list:
                 date = records[-1][0].strftime("%Y-%m-%d")
-                tips += f"{date}:\n"
+                tips += f"{date}:"
                 record_list = [record[0] for record in records]
                 for record in sorted(records, key=lambda x: x[0]):
                     r_time = record[0].strftime("%H:%M:%S")
-                    tips += f"\n车辆{record[3]}:\n{r_time} {record[2]} {record[1]}"
+                    tips += f"\n{record[3][-1]}:\n{r_time} {record[1]} {record[2][0]}"
                 send_text(tips, park_admin, 'parking')
                 return
             
@@ -101,15 +101,15 @@ async def watching_parking():
             new_records = [record for record in records if record[0] not in record_list]
             if not new_records:
                 return
-            
-            # 更新record_list为最新的10条记录时间列表，确保始终保持10条记录
-            record_list = new_record_times[:10]
-            date = record_list[-1].strftime("%Y-%m-%d")
-            tips += f"{date}:\n"
+
+            date = new_records[-1][0].strftime("%Y-%m-%d")
+            tips += f"{date}:"
             # 发送新增记录的通知
             for record in sorted(new_records, key=lambda x: x[0]):
                 r_time = record[0].strftime("%H:%M:%S")
-                tips += f"\n车辆{record[3]}:\n{r_time} {record[2]} {record[1]}"
+                tips += f"\n{record[3][-1]}:\n{r_time} {record[1]} {record[2][0]}"
+                record_list.insert(0, record[0])
+            record_list = record_list[:15]
             send_text(tips, park_admin, 'parking')
 
     except Error as e:
