@@ -97,7 +97,7 @@ async def root(request: Request):
     log.info(msg.__str__())
 
     if not msg.is_self:
-        forward_msg(msg.__to_dict__())
+        await forward_msg(body)
         reply, func, msg = trigger(msg)
         if reply:
             if len(msg.content) < 50:
@@ -111,6 +111,8 @@ async def root(request: Request):
                 asyncio.create_task(trigger_func(msg))
             else:
                 log.warning(f"未找到函数 {func}, 请检查配置")
+
+    return {"message": "success"}
 
 
 def trigger(msg):

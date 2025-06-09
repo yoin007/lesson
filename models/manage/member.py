@@ -163,10 +163,11 @@ class Member:
         contacts_list = self.wx_contacts()
         contacts = self.db_contacts()
         updated_count = 0
+        insert_count = 0
         try:
-            for contact in contacts_list:
-                if contact["friendid"] not in contacts:
-                    with self as m:
+            with self as m:
+                for contact in contacts_list:
+                    if contact["friendid"] not in contacts:
                         m.__cursor__.execute(
                             """
                             INSERT INTO contacts (wxid, wxid_re, remark, nick_name, phone, sex, city, province, country, notes)
@@ -185,10 +186,8 @@ class Member:
                                 "",
                             ),
                         )
-                        self.__conn__.commit()
-                        updated_count += m.__cursor__.rowcount
-                else:
-                    with self as m:
+                        insert_count += m.__cursor__.rowcount
+                    else:
                         m.__cursor__.execute(
                             """
                             UPDATE contacts SET wxid_re = ?, remark = ?, nick_name = ?, phone = ?, sex = ?, city = ?, province = ?, country = ?
@@ -206,11 +205,12 @@ class Member:
                                 contact["friendid"],
                             ),
                         )
-                        self.__conn__.commit()
                         updated_count += m.__cursor__.rowcount
+                self.__conn__.commit()
 
-            if updated_count > 0:
+            if updated_count > 0 or insert_count > 0:
                 self.log.info(f"更新联系人成功，更新{updated_count}条数据")
+                self.log.info(f"插入联系人成功，插入{insert_count}条数据")
                 return True
             else:
                 self.log.info("联系人无更新")

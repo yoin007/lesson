@@ -12,7 +12,7 @@ from time import sleep
 from client import Client
 
 
-def forward_msg(msg):
+async def forward_msg(msg):
     urls = Config().get_config("forward_url")
     if not urls or len(urls) == 0:
         return

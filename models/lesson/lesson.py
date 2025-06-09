@@ -152,7 +152,9 @@ class Lesson:
         file_mtime = os.path.getmtime(file_path)
         kwargs_str = str(sorted(kwargs.items()))  # 确保 kwargs 可哈希
         cache_key = (file_path, file_mtime, sheet_name, kwargs_str)
-        return pd.read_excel(file_path, sheet_name=sheet_name, engine="openpyxl", **kwargs)
+        return pd.read_excel(
+            file_path, sheet_name=sheet_name, engine="openpyxl", **kwargs
+        )
 
     @error_handler
     def _load_excel_file(
@@ -228,8 +230,10 @@ class Lesson:
                 contacts_list = m.db_contacts()
                 for contact in contacts_list:
                     remark = m.wxid_remark(contact)
-                    if remark and remark[0][:2] == "天龙":
-                        contacts[remark[0].replace("天龙", "")] = contact
+                    if remark and (remark[0][:2] == "天龙" or remark[0][:2] == "TL"):
+                        contacts[remark[0].replace("天龙", "").replace("TL", "")] = (
+                            contact
+                        )
             return contacts
         except Exception as e:
             log.error(f"获取联系人信息失败: {str(e)}")
@@ -620,9 +624,7 @@ class Lesson:
 
     def get_subject_teacher(self, subject: str) -> str:
         """获取科目对应的老师"""
-        subject_teacher = self._read_excel_with_cache(
-            os.path.join(self.lesson_dir, "checkTemplate.xlsx"), sheet_name="teachers"
-        ).apply(list, axis=1)
+        subject_teacher = self.teacher_template.apply(list, axis=1)
         for s_t in subject_teacher:
             if subject in s_t[1].split("/"):
                 return s_t[0]
@@ -654,9 +656,7 @@ class Lesson:
             return df_schedule
 
         # 读取科目-老师对应关系
-        subject_teacher = self._read_excel_with_cache(
-            os.path.join(self.lesson_dir, "checkTemplate.xlsx"), sheet_name="teachers"
-        )
+        subject_teacher = self.teacher_template
 
         # 创建科目到老师的映射字典
         subject_to_teacher = {}
@@ -740,8 +740,8 @@ class Lesson:
                     return UPDATE_FAILED
 
                 # 检查新课表是否正确
-                new_path = os.path.normpath(new_schedule_file).replace('\\', '/')
-                response_path = os.path.normpath(response_path).replace('\\', '/')
+                new_path = os.path.normpath(new_schedule_file).replace("\\", "/")
+                response_path = os.path.normpath(response_path).replace("\\", "/")
                 log.info(f"下载的课表文件：{response_path}, 新课表文件：{new_path}")
                 if response_path == new_path:
                     if return_flag == 10:
@@ -1341,72 +1341,59 @@ async def update_schedule_all(record: any):
         zip(class_leaders["class_name"], class_leaders["class_en"])
     )  # 班级-班级名称en
     teacher_name = re.match(r"^(.+?)\s*的课表$", content).group(1)
+    teacher_template = l.teacher_template
 
     # 创建异步任务列表
     tasks = []
 
     if teacher_name == "更新所有人":
-        # 通知所有老师
-        for k, v in contacts.items():
-            teacher_name = k
-            wxid = v
-            df = l.get_teacher_schedule(teacher_name)
-            if df.empty:
-                for a in l.admin:
-                    send_text(f"{teacher_name}的课表不存在", a)
-            else:
-                # 创建一个异步任务来处理图片生成和发送
-                tasks.append(
-                    process_and_send_image(
-                        l, df, f"{wxid}.png", f"{teacher_name}的课表", wxid, "lesson"
-                    )
+        week_next = False
+    if teacher_name == "更新下周":
+        week_next = True
+    # 通知所有老师
+    for k, v in contacts.items():
+        teacher_name = k
+        try:
+            teacher_temp = teacher_template[teacher_template["name"] == teacher_name]
+            if not teacher_temp.empty and int(teacher_temp["active"].values[0]) == 0:
+                log.info(f"{teacher_name} 未激活")
+                continue
+        except Exception as e:
+            log.error(f"update_schedule_all: {e}")
+            continue
+        wxid = v
+        df = l.get_teacher_schedule(teacher_name, week_next=week_next)
+        if df.empty:
+            for a in l.admin:
+                send_text(f"{teacher_name}的课表不存在", a)
+        else:
+            title = (
+                f"{teacher_name}下周的课表" if week_next else f"{teacher_name}的课表"
+            )
+            # 创建一个异步任务来处理图片生成和发送
+            tasks.append(
+                process_and_send_image(l, df, f"{wxid}.png", title, wxid, "lesson")
+            )
+    class_template = l.class_template
+    # 通知班主任班级课表
+    for k, v in leaders_dict.items():
+        try:
+            class_temp = class_template[class_template["class_name"] == k]
+            if not class_temp.empty and int(class_temp["active"].values[0]) == 0:
+                log.info(f"{k} 未激活")
+                continue
+        except Exception as e:
+            log.error(f"update_schedule_all: {e}")
+            continue
+        class_df = l.get_class_schedule(k, week_next=week_next)
+        title = f"{k}下周的课表" if week_next else f"{k}的课表"
+        if not class_df.empty:
+            # 创建一个异步任务来处理图片生成和发送给多个接收者
+            tasks.append(
+                process_and_send_class_image(
+                    l, class_df, f"class_{v}.png", title, k, "lesson"
                 )
-
-        # 通知班主任班级课表
-        for k, v in leaders_dict.items():
-            class_df = l.get_class_schedule(k)
-            title = f"{k}的课表"
-            if not class_df.empty:
-                # 创建一个异步任务来处理图片生成和发送给多个接收者
-                tasks.append(
-                    process_and_send_class_image(
-                        l, class_df, f"class_{v}.png", title, k, "lesson"
-                    )
-                )
-
-    elif teacher_name == "更新下周":
-        # 通知所有老师
-        for k, v in contacts.items():
-            teacher_name = k
-            wxid = v
-            df = l.get_teacher_schedule(teacher_name, week_next=True)
-            if df.empty:
-                for a in l.admin:
-                    send_text(f"{teacher_name}的课表不存在", a)
-            else:
-                # 创建一个异步任务来处理图片生成和发送
-                tasks.append(
-                    process_and_send_image(
-                        l,
-                        df,
-                        f"{wxid}.png",
-                        f"{teacher_name}下周的课表",
-                        wxid,
-                        "lesson",
-                    )
-                )
-
-        # 通知班主任班级课表
-        for k, v in leaders_dict.items():
-            class_df = l.get_class_schedule(k, week_next=True)
-            title = f"{k}下周的课表"
-            if not class_df.empty:
-                # 创建一个异步任务来处理图片生成和发送给多个接收者
-                tasks.append(
-                    process_and_send_class_image(
-                        l, class_df, f"class_{v}.png", title, k, "lesson"
-                    )
-                )
+            )
 
     # 等待所有任务完成
     if tasks:
@@ -1672,18 +1659,34 @@ async def current_week_info(record: any):
 @check_permission
 async def get_ip_info(record: any):
     content = record.content
-    if content == "我的上网信息":
-        wxid = record.roomid
-        l = Lesson()
-        ip_info = l.ip_info
-        tips = "你的上网信息如下：\n"
-        for k, v in l.contacts.items():
-            if v == wxid:
-                ip = ip_info.loc[k]
-                tips += f"\n电脑认证账号：{ip['PC']}"
-                tips += f"\n电脑设置IP：{ip['IP']}"
-                tips += f"\nWiFi认证账号：{ip['WiFi']}"
-        send_text(tips, wxid)
+    l = Lesson()
+    ip_info = l.ip_info
+    name = ""
+    ip = {}
+    try:
+        if content == "上网信息":
+            wxid = record.roomid
+            for k, v in l.contacts.items():
+                if v == wxid:
+                    name = k
+        else:
+            name = content.replace("的上网信息", "")
+            wxid = Config().get_config("admin")
+        ip = ip_info.loc[name]
+        tips = f"{name}的上网信息如下：\n"
+        # 检查 Series 是否为空
+        if not ip.empty:
+            tips = f"{name}的上网信息如下：\n"
+            tips += f"\n电脑认证账号：{ip['PC']}"
+            tips += f"\n电脑设置IP：{ip['IP']}"
+            tips += f"\nWiFi认证账号：{ip['WiFi']}"
+            send_text(tips, wxid)
+        else:
+            tips = f"{name}没有找到上网信息。"
+            send_text(tips, wxid)
+    except Exception as e:
+        send_text(f"{name} 上网信息不存在，请联系管理员", record.roomid)
+        return
 
 
 def group_send(xlsx_file, sender):
@@ -1767,7 +1770,9 @@ async def file_template(record: any):
     获取模板文件， 根据 file_template 文件配置 文件字典
     """
     file_name = (
-        record.content.replace("：", ":").replace("获取文件:", "").replace(" ", "")
+        record.content.replace("：", ":").replace("获取文件:", "").replace(" ", "").replace(
+            "文件获取:", ""
+        )
     )
     file_template_path = Config().get_config("file_template")[file_name]
     template_file = "template/" + file_template_path
