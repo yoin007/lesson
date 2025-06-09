@@ -74,10 +74,6 @@ class Lesson:
         }
         # 为不同类型的缓存设置不同的TTL
         self._cache_config = {
-            "teacher_template": {"ttl": 60 * 60 * 24 * 3, "last_update": None},  # 3天
-            "class_template": {"ttl": 60 * 60 * 24 * 30, "last_update": None},
-            "time_table": {"ttl": 60 * 60 * 24 * 30, "last_update": None},
-            "ip_info": {"ttl": 60 * 60 * 24 * 30, "last_update": None},
             "contacts": {"ttl": 60 * 60 * 24 * 30, "last_update": None},
         }
         # 错误消息常量
@@ -112,23 +108,15 @@ class Lesson:
             self._cache_config[cache_type]["last_update"] = current_time
 
         # 清除所有缓存
-        self._teacher_template_cache = None
         self._current_schedule_file = None
-        self._class_template_cache = None
-        self._ip_info_cache = None
         self._contacts_cache = None
-        self._time_table_cache = None
         # 重新加载所有缓存
         try:
             self.current_month = self.month_info()
             self.week_info = self.get_week_info()
             self.week_next = self.get_week_info(next_week=True)
-            self._class_template_cache = self._load_class_template()
             self._current_schedule_file = self.current_schedule_file(week_next=False)
-            self._time_table_cache = self._load_time_table()
             self._contacts_cache = self._load_contacts()
-            self._ip_info_cache = self._load_ip_info()
-            self._teacher_template_cache = self._load_teacher_template()
             log.info("缓存已刷新")
         except Exception as e:
             log.error(f"刷新缓存时发生错误: {str(e)}")
@@ -174,7 +162,8 @@ class Lesson:
         except Exception as e:
             raise LessonError(f"{error_msg}: {str(e)}")
 
-    def _load_teacher_template(self):
+    @property
+    def teacher_template(self):
         """加载教师模板数据"""
         template_path = os.path.join(self.lesson_dir, "checkTemplate.xlsx")
         try:
@@ -184,7 +173,8 @@ class Lesson:
         except LessonError:
             return pd.DataFrame()
 
-    def _load_class_template(self):
+    @property
+    def class_template(self):
         """加载班级模板数据"""
         template_path = os.path.join(self.lesson_dir, "checkTemplate.xlsx")
         try:
@@ -194,7 +184,8 @@ class Lesson:
         except LessonError:
             return pd.DataFrame()
 
-    def _load_time_table(self):
+    @property
+    def time_table(self):
         """加载时间表数据"""
         template_path = os.path.join(self.lesson_dir, "checkTemplate.xlsx")
         try:
@@ -204,7 +195,8 @@ class Lesson:
         except LessonError:
             return pd.DataFrame()
 
-    def _load_ip_info(self):
+    @property
+    def ip_info(self):
         """加载IP信息数据"""
         ip_info_path = os.path.join(self.lesson_dir, "zhanghao.xlsx")
         try:
@@ -238,44 +230,6 @@ class Lesson:
         except Exception as e:
             log.error(f"获取联系人信息失败: {str(e)}")
             return {}
-
-    @property
-    def teacher_template(self):
-        """获取教师模板，按需刷新"""
-        if (
-            self._should_refresh_cache("teacher_template")
-            or self._teacher_template_cache is None
-        ):
-            self._teacher_template_cache = self._load_teacher_template()
-            self._update_cache_timestamp("teacher_template")
-        return self._teacher_template_cache
-
-    @property
-    def class_template(self):
-        """获取班级模板，按需刷新"""
-        if (
-            self._should_refresh_cache("class_template")
-            or self._class_template_cache is None
-        ):
-            self._class_template_cache = self._load_class_template()
-            self._update_cache_timestamp("class_template")
-        return self._class_template_cache
-
-    @property
-    def time_table(self):
-        """获取时间表，按需刷新"""
-        if self._should_refresh_cache("time_table") or self._time_table_cache is None:
-            self._time_table_cache = self._load_time_table()
-            self._update_cache_timestamp("time_table")
-        return self._time_table_cache
-
-    @property
-    def ip_info(self):
-        """获取IP信息，按需刷新"""
-        if self._should_refresh_cache("ip_info") or self._ip_info_cache is None:
-            self._ip_info_cache = self._load_ip_info()
-            self._update_cache_timestamp("ip_info")
-        return self._ip_info_cache
 
     @property
     def contacts(self):
