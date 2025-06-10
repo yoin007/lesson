@@ -61,7 +61,6 @@ class Lesson:
     def __init__(self):
         if hasattr(self, "_initialized"):
             return
-        self.datashow_info = Config().get_config("datashow_info")
         self.lesson_dir = Config().get_config("lesson_dir")
         self.admin = Config().get_config("lesson_admin")
         self.create_c_month_dir()
