@@ -101,10 +101,10 @@ class WxMsg:
     def parse_content(self):
         """解析消息内容"""
         content = self.content
-        if isinstance(content, str):
+        if  isinstance(content, str):
             if ":" in content and "{" in content:
                 parts = content.split(":", 1)
-                if len(parts) > 1 and "{" in parts[1]:
+                if len(parts) > 1 and "{" == parts[1][0]:
                     self.sender = parts[0]
                     try:
                         json_content = json.loads(parts[1])
@@ -168,6 +168,32 @@ class WxMsg:
                 )
             )
             self.content = "[语音消息]"
+        elif self.type == 4:
+            self.sender = (
+                self.roomid
+                if not self.is_group
+                else (
+                    content.split(":{\"Thumb\"")[0]
+                    if isinstance(content, str) and ":{\"Thumb" in content
+                    else ""
+                )
+            )
+            self.ext = (
+                content
+                if not self.is_group
+                else (
+                    json.loads(content.split(f"{self.sender}:")[1])
+                    if isinstance(content, str) and ":{\"Thumb" in content
+                    else content
+                )
+            )
+            if not self.is_group:
+                self.thumb = (
+                    self.ext.get("Thumb", "")
+                    if isinstance(self.ext, dict) and "Thumb" in self.ext
+                    else ""
+                )
+            self.content = f"[视频消息]"
         elif self.type == 5:
             self.content = f"[系统消息] {self.content}"
         elif self.type == 6:

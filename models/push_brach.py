@@ -7,6 +7,10 @@ from config.config import Config
 from datetime import datetime
 from client import Client
 from sendqueue import send_text
+from config.log import LogConfig
+
+
+log = LogConfig().get_logger()
 
 
 def login_github(token):
@@ -22,15 +26,16 @@ def login_github(token):
         response = requests.get("https://api.github.com/user", headers=headers)
 
         if response.status_code == 200:
-            print(
-                f"成功登录GitHub，欢迎 {response.json()['name'] or response.json()['login']}"
-            )
+            tips = f"成功登录GitHub，欢迎 {response.json()['name'] or response.json()['login']}"
+            log.info(tips)
             return True
         else:
-            print(f"登录失败: {response.json().get('message', '未知错误')}")
+            tips = f"登录失败: {response.json().get('message', '未知错误')}"
+            log.error(tips)
             return False
     except Exception as e:
-        print(f"登录过程中发生错误: {str(e)}")
+        tips = f"登录过程中发生错误: {str(e)}"
+        log.error(tips)
         return False
 
 def push_branch(
@@ -53,7 +58,7 @@ def push_branch(
     try:
         # 检查路径是否存在
         if not os.path.exists(repo_path):
-            print(f"错误: 路径 '{repo_path}' 不存在")
+            log.error(f"错误: 路径 '{repo_path}' 不存在")
             return False
 
         # 初始化仓库对象
@@ -61,7 +66,7 @@ def push_branch(
 
         # 如果设置了代理，则配置 Git 使用代理
         if proxy:
-            print(f"设置代理: {proxy}")
+            log.info(f"设置代理: {proxy}")
             with repo.config_writer() as git_config:
                 git_config.set_value("http", "proxy", proxy)
                 git_config.set_value("https", "proxy", proxy)
@@ -70,7 +75,7 @@ def push_branch(
         try:
             remote = repo.remote(name=remote_name)
         except ValueError:
-            print(f"错误: 远程仓库 '{remote_name}' 不存在")
+            log.error(f"错误: 远程仓库 '{remote_name}' 不存在")
             return False
 
         # 获取所有远程分支
@@ -88,10 +93,10 @@ def push_branch(
         if not local_branch_exists:
             # 如果远程分支存在，则创建本地分支并跟踪远程分支
             if branch_exists_remotely:
-                print(f"创建本地分支 '{branch_name}' 并跟踪远程分支")
+                log.info(f"创建本地分支 '{branch_name}' 并跟踪远程分支")
                 repo.git.checkout("-b", branch_name, f"{remote_name}/{branch_name}")
             else:
-                print(f"远程分支 '{branch_name}' 不存在，无法推送")
+                log.error(f"远程分支 '{branch_name}' 不存在，无法推送")
                 return False
         else:
             # 切换到指定分支
@@ -103,35 +108,47 @@ def push_branch(
         # 提交更改
         if repo.is_dirty():
             repo.git.commit("-m", commit_message)
-            print(f"已提交更改: {commit_message}")
+            log.info(f"已提交更改: {commit_message}")
         else:
-            print("没有需要提交的更改")
+            log.error("没有需要提交的更改")
 
-        # 推送到远程
-        repo.git.push(remote_name, branch_name)
-        print(f"成功推送到 {remote_name}/{branch_name}")
+        # 推送到远程（添加重试机制）
+        max_retries = 3
+        retry_count = 0
+        while retry_count < max_retries:
+            try:
+                repo.git.push(remote_name, branch_name)
+                log.info(f"成功推送到 {remote_name}/{branch_name}")
+                return True
+            except GitCommandError as push_error:
+                retry_count += 1
+                if retry_count < max_retries:
+                    log.warning(f"推送失败，正在进行第 {retry_count} 次重试...")
+                    import time
+                    time.sleep(2)  # 等待2秒后重试
+                else:
+                    raise push_error
 
         return True
     except GitCommandError as e:
-        print(f"Git命令错误: {str(e)}")
+        log.error(f"Git命令错误: {str(e)}")
         return False
     except Exception as e:
-        print(f"发生错误: {str(e)}")
+        log.error(f"发生错误: {str(e)}")
         return False
 
 def get_qrcode(roomid, png_path):
     c = Client()
     r = c.group_qr(roomid)
-
     if r:
-        rsp = requests.get(r)
+        rsp = requests.get(r, timeout=50)
         if rsp.status_code == 200:
             with open(png_path, "wb") as f:
                 f.write(rsp.content)
-            print("二维码已保存到", png_path)
+            log.info("二维码已保存到", png_path)
             return True
     else:
-        print("获取二维码失败")
+        log.error("获取二维码失败")
         return False
 
 
@@ -142,14 +159,14 @@ def push_qrcode():
         token = Config().get_config("git_token")
         # 登录GitHub
         if not login_github(token):
-            print("登录失败，程序退出")
+            log.error("登录失败，程序退出")
             send_text("github登录失败，程序退出", admin)
             sys.exit(1)
         
         # 获取群号
         qrcode_git = Config().get_config("qrcode_git")
         if not qrcode_git:
-            print("未配置群号，程序退出")
+            log.error("未配置群号，程序退出")
             send_text("未配置更新二维码群号，程序退出", admin)
             sys.exit(1)
 
@@ -158,9 +175,9 @@ def push_qrcode():
         commit_message = f"自动提交 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         remote_name = "origin"
         proxy = Config().get_config("proxy")
-        root_path = Config().get_config("qr_root")
+        root_path = Config().get_config("lesson_dir")
         for name, roomid in qrcode_git.items():
-            repo_path = os.path.join(root_path, name)
+            repo_path = os.path.join(root_path, 'qrcode', name)
             png_path = os.path.join(repo_path, "1.png")
             if get_qrcode(roomid, png_path):
                 if push_branch(repo_path, branch_name, commit_message, remote_name, proxy=proxy):
@@ -169,7 +186,7 @@ def push_qrcode():
                     send_text(f"{name}推送失败", admin)
 
     except Exception as e:
-        print(f"发生错误: {str(e)}")
+        log.error(f"发生错误: {str(e)}")
         send_text(f"更新二位码发生错误: {str(e)}", admin)
 
 async def change_roomid(record):
@@ -182,8 +199,8 @@ async def change_roomid(record):
     if name in qrcode_git:
         qrcode_git[name] = roomid
         if Config().modify_config("qrcode_git", qrcode_git):
-            print("修改成功")
-            send_text("修改群成功", record.sender)
+            log.info(f"修改群成功{name} {roomid}")
+            send_text(f"修改群成功{name}", record.sender)
     else:
-        print("未找到该群号")
+        log.error("未找到该群号")
         send_text("未找到该群号", record.sender)
