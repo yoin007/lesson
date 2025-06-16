@@ -76,13 +76,16 @@ class Application:
         tips += f"院校官网：{result[11]}\n" if result[11] else ""
         tips += f"招生网站：{result[12]}\n" if result[12] else ""
         tips += f"联系电话：{result[13]}\n" if result[13] else ""
-        tips += f"院校介绍：\n\t{result[1]}\n\t{result[2]}"
+        if result[1]:
+            yggk = result[1].split("-")[-1].split(".")[0]
+            tips += f"院校介绍：\n\t{yggk}"
+            tips += f"\n\t{result[2]}" if result[2] else ""
         return tips
 
 
 async def zy_jieshao(record):
     zy = record.content.replace(" ", "").replace("专业介绍-", "")
-    zydm = zy if zy.isdigit() else 0
+    zydm = zy if zy[:-1].isdigit() else 0
     a = Application()
     if zydm:
         tips = a.query_zy(zydm=zy)
