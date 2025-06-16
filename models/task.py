@@ -471,6 +471,11 @@ def task_wrapper(func, task_id):
     return wrapper
 
 
+# def watching_parking():
+#     """监控停车场任务"""
+#     print("监控停车场任务")
+
+
 def load_tasks_from_db():
     """从数据库加载任务到调度器"""
     # 函数映射表

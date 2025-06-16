@@ -89,7 +89,10 @@ async def invite_chatroom_member(record: any):
     invite_rooms = Config().get_config("invite_rooms")
     chatrooms = Config().get_config("qrcode_git")
     try:
-        roomid = chatrooms[invite_rooms[text]]
+        if "可乐" in record.content or "招生群" in record.content:
+            roomid = chatrooms[invite_rooms[text]]
+        else:
+            roomid = invite_rooms[text]
         c = Client()
         c.group_manage(roomid, record.sender, 2)
         return True
