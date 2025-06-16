@@ -78,7 +78,9 @@ class Application:
         tips += f"联系电话：{result[13]}\n" if result[13] else ""
         if result[1]:
             yggk = result[1].split("-")[-1].split(".")[0]
-            tips += f"院校介绍：\n\t{yggk}"
+            tips += (
+                f"院校介绍：\n\thttps://gaokao.chsi.com.cn/wap/sch/schinfomain/{yggk}"
+            )
             tips += f"\n\t{result[2]}" if result[2] else ""
         return tips
 
