@@ -1030,6 +1030,11 @@ class Lesson:
             log.error(f"Error processing schedule file: {e}")
         lines = len(df.index) + 2
         css = """
+            body {
+                margin: 0;
+                padding: 0;
+                overflow: visible;
+            }
             table {
                 border-collapse: collapse;
                 width: 100%;
@@ -1069,19 +1074,42 @@ class Lesson:
         timestamp = str(int(time.time() * 1000))
         g = png_name.split(".")
         png_name = f"{g[0]}_{timestamp}.{g[1]}"
-        with open(os.path.join(self.lesson_dir, "temp", f"{png_name}.html"), "w") as f:
-            f.write(f'<h2 style="text-align: center;">{title}</h2>\n')
-            f.write("<style>{}</style>\n{}".format(css, html))
-
-        with open(os.path.join(self.lesson_dir, "temp", f"{png_name}.html"), "r") as f:
-            html_code = f.read()
+        
+        # 创建完整的HTML文档
+        full_html = f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>{css}</style>
+        </head>
+        <body>
+            <h2 style="text-align: center;">{title}</h2>
+            {html}
+        </body>
+        </html>
+        '''
+        
+        html_file_path = os.path.join(self.lesson_dir, "temp", f"{png_name}.html")
+        with open(html_file_path, "w", encoding="utf-8") as f:
+            f.write(full_html)
 
         # 设置大小（这个可以在锁外设置）
-        self.hti.size = (1440, 35 * lines + 50)
+        # 确保高度足够容纳所有内容，对于小表格设置最小高度
+        min_height = max(35 * lines + 150, 400)  # 增加高度，确保捕获全部内容
+        # print(min_height)
+        self.hti.size = (1440, min_height)
+        
+        # 设置额外的浏览器参数，确保完整渲染
+        self.hti.browser.flags = ["--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--hide-scrollbars"]
 
         # 使用类锁确保一次只有一个线程使用Html2Image
         with Lesson._hti_lock:
-            image = self.hti.screenshot(html_code, save_as=png_name)
+            # 使用文件路径而不是HTML代码，并使用截取全页面的选项
+            image = self.hti.screenshot(
+                url=f"file://{os.path.abspath(html_file_path)}",
+                save_as=png_name
+            )
         return image
 
     def get_teacher_schedule(

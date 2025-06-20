@@ -183,6 +183,11 @@ class Homework:
             log.error("获取公告失败")
             raise e
 
+@check_permission
+async def hw_template(record):
+    tips = "作业布置\n$班级：202401/202402\n$学科：地理\n$教师：李老师\n$内容：\n1.完成学案\n2.预习新课\n3.练习\n$上交日期：2024-12-12\n$预计用时：20\n$ 作业类型：日常"
+    send_text(tips, record.roomid)
+
 
 @check_permission
 async def incert_homework(record):
