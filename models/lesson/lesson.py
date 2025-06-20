@@ -1021,10 +1021,10 @@ class Lesson:
             log.error(f"Error processing schedule file: {e}")
             return None
 
-    def df_to_png(self, df: pd.DataFrame, png_name: str = "temp.png", title: str = ""):
+    def df_to_png(self, df: pd.DataFrame, png_name: str = "temp.png", title: str = "", index_name="节次\星期"):
         """将df转换为png图片"""
         try:
-            df.index.name = "节次\星期"
+            df.index.name = index_name
             df.reset_index(inplace=True)
         except Exception as e:
             log.error(f"Error processing schedule file: {e}")
