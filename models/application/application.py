@@ -179,7 +179,6 @@ class Application:
         if yx:
             conditions.append("院校 = ?")
             params.append(yx)
-        print(year)
         if year:
             conditions.append("年份 = ?")
             params.append(year)
@@ -199,15 +198,14 @@ class Application:
             conditions.append("层次 = ?")
             params.append(level)
         where_clause = " AND ".join(conditions)
-        sql = f"SELECT * FROM {table_name} WHERE {where_clause}" if conditions else "SELECT * FROM toudang"
+        sql = f"SELECT * FROM {table_name} WHERE {where_clause}"
         # print(sql)
         # print(params)
         with self as app:
             app.__cursor__.execute(sql, params)
             results = app.__cursor__.fetchall()
         if not results:
-            return pd.DateFrame()
-        results = results[:counts]
+            return pd.DataFrame()
         if category == '美术类':
             df = pd.DataFrame(results, columns=['类型', '年份', '批次', '层次', '专业', '院校', '计划数', '最低分数', '院校代码'])
             df['最低分数'] = pd.to_numeric(df['最低分数'], errors='coerce').astype(float)
@@ -218,7 +216,9 @@ class Application:
             df['最低位次'] = pd.to_numeric(df['最低位次'], errors='coerce').astype(int)
             df.sort_values(by='最低位次', ascending = True, inplace=True)
             df['分数'] = df.apply(lambda row: self.rank_to_score(row['最低位次'], row['类型'], row['年份']), axis=1)
-        return df
+        data = df[:counts].reset_index(drop=True)
+        data.index += 1
+        return data
 
 def df_to_png(df, png_name, title):
     """
