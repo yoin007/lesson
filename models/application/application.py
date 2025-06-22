@@ -401,6 +401,7 @@ async def zy_toudang(record=None):
         send_text("查询参数有误，请参照下面的模板重新输入！", record.roomid)
         tips = "<专业投档>\n类别:美术类\n专业:不能为空\n年份:2024\n院校:可以为空\n位次:1000\n层次:本科"
         send_text(tips, record.roomid)
+        send_text("建议认真阅读《小助手志愿填报辅助功能使用说明！》：https://mp.weixin.qq.com/s/wJghHBWqDqxqSCppst2dZQ", record.roomid)
         return None
 
     df = app.toudang(
@@ -430,6 +431,7 @@ async def yx_toudang(record=None):
         send_text("查询参数有误，请参照下面的模板重新输入！", record.roomid)
         tips = "<院校投档>\n类别:美术类\n专业:可以为空\n年份:2024\n院校:不能为空)\n层次:本科"
         send_text(tips, record.roomid)
+        send_text("建议认真阅读《小助手志愿填报辅助功能使用说明！》：https://mp.weixin.qq.com/s/wJghHBWqDqxqSCppst2dZQ", record.roomid)
         return 0
 
     df = app.toudang(
