@@ -22,6 +22,10 @@ from models.manage.member import Member, check_permission
 
 log = LogConfig().get_logger()
 
+# # test
+# send_text = print
+# send_image = print
+
 
 class LessonError(Exception):
     """课程模块自定义异常"""
@@ -1322,7 +1326,8 @@ async def update_schedule_all(record: any):
         zip(class_leaders["class_name"], class_leaders["class_en"])
     )  # 班级-班级名称en
     teacher_name = re.match(r"^(.+?)\s*的课表$", content).group(1)
-    teacher_template = l.teacher_template
+    t = l.teacher_template
+    teachers = t[t['active'] == 1]['name'].tolist()
 
     # 创建异步任务列表
     tasks = []
@@ -1332,17 +1337,8 @@ async def update_schedule_all(record: any):
     if teacher_name == "更新下周":
         week_next = True
     # 通知所有老师
-    for k, v in contacts.items():
-        teacher_name = k
-        try:
-            teacher_temp = teacher_template[teacher_template["name"] == teacher_name]
-            if not teacher_temp.empty and int(teacher_temp["active"].values[0]) == 0:
-                log.info(f"{teacher_name} 未激活")
-                continue
-        except Exception as e:
-            log.error(f"update_schedule_all: {e}")
-            continue
-        wxid = v
+    for teacher_name in teachers:
+        wxid = l.get_wxids(teacher_name)[0]
         df = l.get_teacher_schedule(teacher_name, week_next=week_next)
         if df.empty:
             for a in l.admin:
@@ -1404,6 +1400,7 @@ async def process_and_send_image(
             if tips:
                 send_text(f"你的课有调整，请注意查看！", wxid)
             send_image(pic_path, wxid, producer)
+            print(title)
 
 
 async def process_and_send_class_image(
@@ -1427,6 +1424,7 @@ async def process_and_send_class_image(
                 if tips:
                     send_text(f"你们班：有调课请注意查看！", wxid)
                 send_image(pic_path, wxid, producer)
+                print(title)
 
 
 @check_permission
