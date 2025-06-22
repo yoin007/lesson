@@ -401,7 +401,7 @@ async def zy_toudang(record=None):
         send_text("查询参数有误，请参照下面的模板重新输入！", record.roomid)
         tips = "<专业投档>\n类别:美术类\n专业:不能为空\n年份:2024\n院校:可以为空\n位次:1000\n层次:本科"
         send_text(tips, record.roomid)
-        send_text("建议认真阅读《小助手志愿填报辅助功能使用说明！》：https://mp.weixin.qq.com/s/wJghHBWqDqxqSCppst2dZQ", record.roomid)
+        send_text("建议认真阅读《小助手志愿填报辅助功能使用说明！》\nhttps://mp.weixin.qq.com/s/Itenk-Oxh_Up77JGwcpwvg", record.roomid)
         return None
 
     df = app.toudang(
@@ -431,7 +431,7 @@ async def yx_toudang(record=None):
         send_text("查询参数有误，请参照下面的模板重新输入！", record.roomid)
         tips = "<院校投档>\n类别:美术类\n专业:可以为空\n年份:2024\n院校:不能为空)\n层次:本科"
         send_text(tips, record.roomid)
-        send_text("建议认真阅读《小助手志愿填报辅助功能使用说明！》：https://mp.weixin.qq.com/s/wJghHBWqDqxqSCppst2dZQ", record.roomid)
+        send_text("建议认真阅读《小助手志愿填报辅助功能使用说明！》\nhttps://mp.weixin.qq.com/s/Itenk-Oxh_Up77JGwcpwvg", record.roomid)
         return 0
 
     df = app.toudang(
@@ -501,7 +501,7 @@ def add_watermark(
     result.save(output_path)
 
 
-def calculate_gradient_intervals(rank, category='普通类', risk_preference='balanced', total_candidates=0, verbose=False):
+def calculate_gradient_intervals(rank, category='普通类', risk_preference='balanced', total_candidates=100000, verbose=False):
     """
     计算五级梯度位次区间，根据考生总数动态划分高中低分段
     
@@ -628,9 +628,9 @@ def calculate_gradient_intervals(rank, category='普通类', risk_preference='ba
         
         # 艺术类志愿分配策略(总志愿数60个)
         allocation = {
-            'aggressive': {'gamble': 0.07, 'reach': 0.23, 'match': 0.35, 'safe': 0.25, 'anchor': 0.10},
-            'balanced':   {'gamble': 0.05, 'reach': 0.18, 'match': 0.40, 'safe': 0.25, 'anchor': 0.12},
-            'conservative': {'gamble': 0.03, 'reach': 0.12, 'match': 0.45, 'safe': 0.25, 'anchor': 0.15}
+            '激进': {'gamble': 0.07, 'reach': 0.23, 'match': 0.35, 'safe': 0.25, 'anchor': 0.10},
+            '均衡':   {'gamble': 0.05, 'reach': 0.18, 'match': 0.40, 'safe': 0.25, 'anchor': 0.12},
+            '保守': {'gamble': 0.03, 'reach': 0.12, 'match': 0.45, 'safe': 0.25, 'anchor': 0.15}
         }
     
     # 计算各梯度的位次区间
