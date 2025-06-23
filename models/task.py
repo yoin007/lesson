@@ -331,7 +331,7 @@ async def add_cron_remind(record):
         # 将任务添加到数据库
         kwargs = {"reminder_text": reminder_text, "roomid": record.roomid}
         task_id = task_scheduler.add_task_to_db(
-            func_name="send_reminder",
+            func_name="send_text",
             trigger_type="cron",
             trigger_args=json.dumps(trigger_args),
             kwargs=kwargs,
