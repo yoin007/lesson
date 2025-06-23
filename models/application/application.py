@@ -267,7 +267,7 @@ class Application:
             results = app.__cursor__.fetchall()
         if not results:
             return pd.DataFrame()
-        if category != "普通类类":
+        if category != "普通类":
             df = pd.DataFrame(
                 results,
                 columns=[
@@ -403,7 +403,13 @@ async def zy_toudang(record=None):
         send_text(tips, record.roomid)
         send_text("建议认真阅读《小助手志愿填报辅助功能使用说明！》\nhttps://mp.weixin.qq.com/s/Itenk-Oxh_Up77JGwcpwvg", record.roomid)
         return None
-
+    zy = text[2].split(":")[-1]
+    if zy:
+        tips = app.query_zy(zy)
+        if tips:
+            tip = tips.split("\n")[10]
+            tip = f"{zy}\n{tip}"
+            send_text(tip, record.roomid)
     df = app.toudang(
         text[1].split(":")[-1],
         text[2].split(":")[-1],
@@ -433,6 +439,13 @@ async def yx_toudang(record=None):
         send_text(tips, record.roomid)
         send_text("建议认真阅读《小助手志愿填报辅助功能使用说明！》\nhttps://mp.weixin.qq.com/s/Itenk-Oxh_Up77JGwcpwvg", record.roomid)
         return 0
+    zy = text[2].split(":")[-1]
+    if zy:
+        tips = app.query_zy(zy)
+        if tips:
+            tip = tips.split("\n")[10]
+            tip = f"{zy}\n{tip}"
+            send_text(tip, record.roomid)
 
     df = app.toudang(
         text[1].split(":")[-1],
