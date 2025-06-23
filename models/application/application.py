@@ -57,7 +57,7 @@ class Application:
             results = app.__cursor__.fetchall()
         tips = ""
         if not results:
-            tips = f"没有找到{zy}专业，请检查专业名称是否正确"
+            tips = f"没有找到{zymc}专业，请检查专业名称是否正确"
             return tips
         for result in results:
             tips += f"类别：{result[1]}\n"
@@ -246,15 +246,19 @@ class Application:
                 table_name = "shufatoudang"
         if rank:
             if category == "美术类":
-                rank = self.rank_to_score(rank, "美术类", year)
-            if category == "音乐类":
-                rank = self.rank_to_score(rank, "音乐类", year)
-            if category == "体育类":
-                rank = self.rank_to_score(rank, "体育类", year)
-            if category == "书法类":
-                rank = self.rank_to_score(rank, "书法类", year)
-            conditions.append("最低位次 <=?")
-            params.append(rank)
+                score = self.rank_to_score(rank, "美术类", year)
+            elif category == "音乐类":
+                score = self.rank_to_score(rank, "音乐类", year)
+            elif category == "体育类":
+                score = self.rank_to_score(rank, "体育类", year)
+            elif category == "书法类":
+                score = self.rank_to_score(rank, "书法类", year)
+            if category == "普通类":
+                conditions.append("最低位次 <=?")
+                params.append(rank)
+            else:
+                conditions.append("最低位次 >=?")
+                params.append(score)
         if level:
             conditions.append("层次 = ?")
             params.append(level)
@@ -285,7 +289,7 @@ class Application:
             df["最低分数"] = pd.to_numeric(df["最低分数"], errors="coerce").astype(
                 float
             )
-            df.sort_values(by="最低分数", ascending=False, inplace=True)
+            df.sort_values(by="最低分数", ascending=True, inplace=True)
             df["位次"] = df.apply(
                 lambda row: self.score_to_rank(
                     row["最低分数"], row["类型"], row["年份"]
@@ -308,7 +312,7 @@ class Application:
                 ],
             )
             df["最低位次"] = pd.to_numeric(df["最低位次"], errors="coerce").astype(int)
-            df.sort_values(by="最低位次", ascending=True, inplace=True)
+            df.sort_values(by="最低位次", ascending=False, inplace=True)
             df["分数"] = df.apply(
                 lambda row: self.rank_to_score(
                     row["最低位次"], row["类型"], row["年份"]
@@ -344,7 +348,31 @@ class Application:
                 "层次",
             ]
         data = data[new_order]
+        data["选科要求"] = df.apply(
+                lambda row: self.get_jh(row["专业"][2:], row["院校"])[0],
+                axis=1,
+            )
+        data[f"{self.year}计划数"] = df.apply(
+                lambda row: self.get_jh(row["专业"][2:], row["院校"])[1],
+                axis=1,
+            )
+        # print(data)
         return data
+    
+    def get_jh(self, zy, yx, year=''):
+        if not zy or not yx:
+            return None
+        if not year:
+            year = self.year
+        sql = f"SELECT 选科要求, 计划数 from jihua WHERE 专业名称 LIKE '{zy}%' and 院校名称='{yx}' and 年份='{year}'"
+        # print(sql)
+        with self as app:
+            app.__cursor__.execute(sql)
+            result = app.__cursor__.fetchone()
+        if result:
+            return result[0], result[1]
+        else:
+            return None, None
 
 
 def df_to_png(df, png_name, title):
@@ -401,12 +429,12 @@ async def zy_toudang(record=None):
         send_text("查询参数有误，请参照下面的模板重新输入！", record.roomid)
         tips = "<专业投档>\n类别:美术类\n专业:不能为空\n年份:2024\n院校:可以为空\n位次:1000\n层次:本科"
         send_text(tips, record.roomid)
-        send_text("建议认真阅读《小助手志愿填报辅助功能使用说明！》\nhttps://mp.weixin.qq.com/s/Itenk-Oxh_Up77JGwcpwvg", record.roomid)
+        send_text("建议认真阅读《小助手志愿填报辅助功能使用说明！》\nhttps://mp.weixin.qq.com/s/O1BymUcRUh-0-tE5YsPXGA", record.roomid)
         return None
     zy = text[2].split(":")[-1]
     if zy:
         tips = app.query_zy(zy)
-        if tips:
+        if len(tips.split('\n'))>10:
             tip = tips.split("\n")[10]
             tip = f"{zy}\n{tip}"
             send_text(tip, record.roomid)
@@ -437,15 +465,17 @@ async def yx_toudang(record=None):
         send_text("查询参数有误，请参照下面的模板重新输入！", record.roomid)
         tips = "<院校投档>\n类别:美术类\n专业:可以为空\n年份:2024\n院校:不能为空)\n层次:本科"
         send_text(tips, record.roomid)
-        send_text("建议认真阅读《小助手志愿填报辅助功能使用说明！》\nhttps://mp.weixin.qq.com/s/Itenk-Oxh_Up77JGwcpwvg", record.roomid)
+        send_text("建议认真阅读《小助手志愿填报辅助功能使用说明！》\nhhttps://mp.weixin.qq.com/s/O1BymUcRUh-0-tE5YsPXGA", record.roomid)
         return 0
     zy = text[2].split(":")[-1]
     if zy:
         tips = app.query_zy(zy)
-        if tips:
+        if len(tips.split('\n'))>10:
             tip = tips.split("\n")[10]
             tip = f"{zy}\n{tip}"
             send_text(tip, record.roomid)
+        else:
+            send_text(tips, record.roomid)
 
     df = app.toudang(
         text[1].split(":")[-1],
