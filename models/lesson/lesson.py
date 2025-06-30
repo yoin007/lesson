@@ -1025,7 +1025,13 @@ class Lesson:
             log.error(f"Error processing schedule file: {e}")
             return None
 
-    def df_to_png(self, df: pd.DataFrame, png_name: str = "temp.png", title: str = "", index_name="节次\星期"):
+    def df_to_png(
+        self,
+        df: pd.DataFrame,
+        png_name: str = "temp.png",
+        title: str = "",
+        index_name="节次\星期",
+    ):
         """将df转换为png图片"""
         try:
             df.index.name = index_name
@@ -1078,9 +1084,9 @@ class Lesson:
         timestamp = str(int(time.time() * 1000))
         g = png_name.split(".")
         png_name = f"{g[0]}_{timestamp}.{g[1]}"
-        
+
         # 创建完整的HTML文档
-        full_html = f'''
+        full_html = f"""
         <!DOCTYPE html>
         <html>
         <head>
@@ -1092,8 +1098,8 @@ class Lesson:
             {html}
         </body>
         </html>
-        '''
-        
+        """
+
         html_file_path = os.path.join(self.lesson_dir, "temp", f"{png_name}.html")
         with open(html_file_path, "w", encoding="utf-8") as f:
             f.write(full_html)
@@ -1103,16 +1109,21 @@ class Lesson:
         min_height = max(35 * lines + 150, 400)  # 增加高度，确保捕获全部内容
         # print(min_height)
         self.hti.size = (1440, min_height)
-        
+
         # 设置额外的浏览器参数，确保完整渲染
-        self.hti.browser.flags = ["--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--hide-scrollbars"]
+        self.hti.browser.flags = [
+            "--headless=new",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--hide-scrollbars",
+        ]
 
         # 使用类锁确保一次只有一个线程使用Html2Image
         with Lesson._hti_lock:
             # 使用文件路径而不是HTML代码，并使用截取全页面的选项
             image = self.hti.screenshot(
-                url=f"file://{os.path.abspath(html_file_path)}",
-                save_as=png_name
+                url=f"file://{os.path.abspath(html_file_path)}", save_as=png_name
             )
         return image
 
@@ -1327,7 +1338,7 @@ async def update_schedule_all(record: any):
     )  # 班级-班级名称en
     teacher_name = re.match(r"^(.+?)\s*的课表$", content).group(1)
     t = l.teacher_template
-    teachers = t[t['active'] == 1]['name'].tolist()
+    teachers = t[t["active"] == 1]["name"].tolist()
 
     # 创建异步任务列表
     tasks = []
@@ -1338,7 +1349,11 @@ async def update_schedule_all(record: any):
         week_next = True
     # 通知所有老师
     for teacher_name in teachers:
-        wxid = l.get_wxids(teacher_name)[0]
+        wxid_list = l.get_wxids(teacher_name)
+        if not wxid_list:
+            l.notify_admins(f"{teacher_name}的wxid不存在")
+            continue
+        wxid = wxid_list[0]
         df = l.get_teacher_schedule(teacher_name, week_next=week_next)
         if df.empty:
             for a in l.admin:
@@ -1749,9 +1764,10 @@ async def file_template(record: any):
     获取模板文件， 根据 file_template 文件配置 文件字典
     """
     file_name = (
-        record.content.replace("：", ":").replace("获取文件:", "").replace(" ", "").replace(
-            "文件获取:", ""
-        )
+        record.content.replace("：", ":")
+        .replace("获取文件:", "")
+        .replace(" ", "")
+        .replace("文件获取:", "")
     )
     file_template_path = Config().get_config("file_template")[file_name]
     template_file = "template/" + file_template_path
