@@ -1215,7 +1215,7 @@ def clear_temp_file():
     l.clear_temp_file()
 
 
-async def create_month_dir():
+def create_month_dir():
     """
     每个月的1号，将上个月的课表复制到 新月份 的目录下
     """
@@ -1230,7 +1230,7 @@ async def create_month_dir():
     except Exception as e:
         log.error(f"创建目录时出错: {str(e)}")
         return False
-    c_month = current_dir.split("/")[-1]
+    c_month = current_dir.split("/")[-1].split('\\')[-1]
     # c_month = "202501"
     year = int(c_month[:4])
     month = int(c_month[4:])
