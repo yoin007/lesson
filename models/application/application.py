@@ -384,14 +384,65 @@ class Application:
             self.log.error(f"获取{column}时出错: {e}")
             return None
 
+    @lru_cache(maxsize=1024)
     def get_jh(self, zy, yx, year=""):
         return self._get_jihua_info(zy, yx, "计划数", year)
 
+    @lru_cache(maxsize=1024)
     def get_xk(self, zy, yx, year=""):
         return self._get_jihua_info(zy, yx, "选科要求", year)
 
+    @lru_cache(maxsize=1024)
     def get_xf(self, zy, yx, year=""):
         return self._get_jihua_info(zy, yx, "学费", year)
+
+    # 批量处理替代逐行应用
+    def batch_get_info(self, df, column_name, info_type):
+        """批量获取信息"""
+        # 创建唯一的(专业,院校)对
+        unique_pairs = df[["专业", "院校"]].drop_duplicates()
+        
+        # 预处理专业名称
+        unique_pairs["处理后专业"] = unique_pairs["专业"].apply(
+            lambda x: x[2:] if isinstance(x, str) else str(x)[2:]
+        )
+        
+        # 创建查询结果字典
+        info_dict = {}
+        
+        # 构建SQL查询
+        placeholders = ", ".join(["(?, ?)"] * len(unique_pairs))
+        params = []
+        for _, row in unique_pairs.iterrows():
+            params.extend([row["院校"], f"{row['处理后专业']}%"])
+        
+        sql = f"""SELECT 院校名称, 专业名称, {info_type} 
+            FROM jihua 
+            WHERE (院校名称, 专业名称) IN ({placeholders}) 
+            AND 年份=?"""
+        params.append(self.year)
+        
+        # 执行批量查询
+        with self as app:
+            app.__cursor__.execute(sql, params)
+            results = app.__cursor__.fetchall()
+        
+        # 填充字典
+        for result in results:
+            yx, zy_full, info = result
+            # 提取专业名称的关键部分进行匹配
+            for _, pair in unique_pairs.iterrows():
+                if pair["院校"] == yx and zy_full.startswith(pair["处理后专业"]):
+                    info_dict[(pair["专业"], yx)] = info
+        
+        # 应用到原始DataFrame
+        df[column_name] = df.apply(
+            lambda row: info_dict.get((row["专业"], row["院校"]), None),
+            axis=1
+        )
+        
+        return df
+
 
     def toudang_range(self, category, year, min_rank, max_rank):
         """根据类别、年份和位次范围查询投档情况
@@ -517,28 +568,32 @@ class Application:
         
         # 添加额外信息
         if is_normal:
-            # 添加普通类特有的额外信息
-            data["选科要求"] = data.apply(
-                lambda row: self.get_xk(
-                    row.专业[2:] if isinstance(row.专业, str) else str(row.专业)[2:],
-                    row.院校
-                ),
-                axis=1
-            )
-            data[f"{self.year}计划数"] = data.apply(
-                lambda row: self.get_jh(
-                    row.专业[2:] if isinstance(row.专业, str) else str(row.专业)[2:],
-                    row.院校
-                ),
-                axis=1
-            )
-            data["学费"] = data.apply(
-                lambda row: self.get_xf(
-                    row.专业[2:] if isinstance(row.专业, str) else str(row.专业)[2:],
-                    row.院校
-                ),
-                axis=1
-            )
+            # # 添加普通类特有的额外信息
+            # data["选科要求"] = data.apply(
+            #     lambda row: self.get_xk(
+            #         row.专业[2:] if isinstance(row.专业, str) else str(row.专业)[2:],
+            #         row.院校
+            #     ),
+            #     axis=1
+            # )
+            # data[f"{self.year}计划数"] = data.apply(
+            #     lambda row: self.get_jh(
+            #         row.专业[2:] if isinstance(row.专业, str) else str(row.专业)[2:],
+            #         row.院校
+            #     ),
+            #     axis=1
+            # )
+            # data["学费"] = data.apply(
+            #     lambda row: self.get_xf(
+            #         row.专业[2:] if isinstance(row.专业, str) else str(row.专业)[2:],
+            #         row.院校
+            #     ),
+            #     axis=1
+            # )
+            
+            data = self.batch_get_info(data, "选科要求", "选科要求")
+            data = self.batch_get_info(data, f"{self.year}计划数", "计划数")
+            data = self.batch_get_info(data, "学费", "学费")
         
         # 添加所有类别都需要的当年分数信息
         score_column = "位次" if not is_normal else "最低位次"
@@ -1217,6 +1272,7 @@ async def range_template(record):
 
 @check_permission
 async def get_gradient_file(record=None):
+# def get_gradient_file(record=None):
     text = record.content.replace(" ", "").split("\n")
     if len(text) != 6:
         send_text(
@@ -1229,6 +1285,11 @@ async def get_gradient_file(record=None):
     year = text[3].split(":")[1]
     risk_preference = text[4].split(":")[1]
     xk = text[5].split(":")[1]
+    # rank = 367087
+    # category = "普通类"
+    # year = "2024"
+    # risk_preference = "均衡"
+    # xk = "物化生"
 
     result, tips = calculate_gradient_intervals(
         rank, category, risk_preference, verbose=False
@@ -1237,6 +1298,7 @@ async def get_gradient_file(record=None):
     intervals = result["intervals"]
     app = Application()
     df = app.toudang_range(category, year, min_r, max_r)
+    # print(len(df))
     if category != "普通类":
         df["梯度"] = df.apply(
             lambda row: get_gradient_level(
@@ -1268,4 +1330,4 @@ async def get_gradient_file(record=None):
     file_path = os.path.join(lesson_dir, "temp", file_name)
     df.to_excel(file_path, index=False)
     time.sleep(2)
-    send_file(os.path.join("temp", file_name), record.roomid)
+    # send_file(os.path.join("temp", file_name), record.roomid)

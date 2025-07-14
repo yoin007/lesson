@@ -329,7 +329,7 @@ async def add_cron_remind(record):
             }
 
         # 将任务添加到数据库
-        kwargs = {"reminder_text": reminder_text, "roomid": record.roomid}
+        kwargs = {"content": reminder_text, "receiver": record.roomid}
         task_id = task_scheduler.add_task_to_db(
             func_name="send_text",
             trigger_type="cron",
@@ -572,3 +572,57 @@ def load_tasks_from_db():
         except Exception as e:
             print(f"添加任务 {func_name} (ID: {task_id}) 失败: {e}")
             print(f"参数: args={args}, kwargs={kwargs}")
+
+
+def incert_task_from_excel(excel_file, func_name='send_text', trigger_type='cron', description='', one_off=True, consumed=False):
+    """从Excel文件导入任务"""
+    import pandas as pd
+    from datetime import datetime
+    
+    # 解析Excel文件
+    df = pd.read_excel(excel_file)
+    # 遍历DataFrame中的每一行
+    for index, row in df.iterrows():
+        # print(row)
+        
+        # 确保日期是datetime对象
+        if isinstance(row['日期'], str):
+            date_obj = datetime.strptime(row['日期'], '%Y-%m-%d %H:%M:%S')
+        else:
+            date_obj = row['日期']
+            
+        year = date_obj.year
+        month = date_obj.month
+        day = date_obj.day
+        
+        time_str = row['时间']
+        hour, minute = map(int, str(time_str).split(':'))
+        second = 0
+        trigger_args = {
+                "year": year,
+                "month": month,
+                "day": day,
+                "hour": hour,
+                "minute": minute,
+                "second": second,
+            }
+        args = []
+        aters = 'notify@all' if row['AT'] else ''
+        kwargs = {
+            "content": row['提醒内容'],
+            "receiver": row['接收者'],
+            "aters": aters,
+        }
+        # 将任务添加到数据库
+        task_id = task_scheduler.add_task_to_db(
+            func_name,
+            trigger_type,
+            json.dumps(trigger_args),
+            args,
+            kwargs,
+            description,
+            one_off,
+            consumed,  
+        )
+        print(f"任务 {task_id} 已添加到数据库")
+

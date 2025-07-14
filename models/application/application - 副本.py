@@ -12,6 +12,7 @@ from config.config import Config
 from sendqueue import send_text, send_image, send_file
 from models.lesson.lesson import Lesson
 from models.manage.member import check_permission
+from functools import lru_cache
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,14 +27,15 @@ lesson_dir = config.get_config("lesson_dir")
 
 
 class Application:
-    def __init__(self):
+    def __init__(self, db_path="databases/colleges.db"):
         self.__conn__ = None
         self.__cursor__ = None
         self.year = datetime.now().year
         self.log = LogConfig().get_logger()
+        self.db_path = db_path
 
-    def __enter__(self, db="databases/colleges.db"):
-        self.__conn__ = sqlite3.connect(db)
+    def __enter__(self):
+        self.__conn__ = sqlite3.connect(self.db_path)
         self.__cursor__ = self.__conn__.cursor()
         return self
 
@@ -49,12 +51,16 @@ class Application:
         """
         if zymc == "" and zydm == 0:
             return "请输入专业名称或专业代码"
+        
+        sql = "select * from zyk where zymc=? or zydm=?"
+        params = []
         if zymc:
-            sql = f"select * from zyk where zymc='{zymc}'"
+            params = [zymc, 0]
         else:
-            sql = f"select * from zyk where zydm='{zydm}'"
+            params = ["", zydm]
+            
         with self as app:
-            app.__cursor__.execute(sql)
+            app.__cursor__.execute(sql, params)
             results = app.__cursor__.fetchall()
         tips = ""
         if not results:
@@ -81,9 +87,9 @@ class Application:
     def query_yx(self, yxmc):
         if yxmc == "":
             return "请输入院校名称"
-        sql = f"select * from schools where school_name='{yxmc}'"
+        sql = "select * from schools where school_name=?"
         with self as app:
-            app.__cursor__.execute(sql)
+            app.__cursor__.execute(sql, (yxmc,))
             result = app.__cursor__.fetchone()
         if not result:
             return f"没有找到{yxmc}院校，请检查院校名称是否正确"
@@ -106,123 +112,148 @@ class Application:
             tips += f"\n\t{result[2]}" if result[2] else ""
         return tips
 
+    @lru_cache(maxsize=128)
     def rank_to_score(self, rank, category, year):
         """
-        专业排名转分数
+        专业排名转分数 (带缓存)
         :param rank: 专业排名
         :param category: 专业类别
         :param year: 年份
         :return: 分数
         """
-        if rank == "" or category == "" or year == "":
+        # 类型检查和数据验证
+        if not rank or not category or not year:
             return -1
-        if category == "普通类":
-            table_name = "putongfenshuduan"
-            query = f"""
-            SELECT 分数
-            FROM {table_name}
-            WHERE 年份 = ? AND 累计人数 <= ?
-            ORDER BY 累计人数 DESC
-            LIMIT 1
-            """
-        elif category == "美术类":
-            table_name = "meishufenshuduan"
-            query = f"""
-            SELECT 分数
-            FROM {table_name}
-            WHERE 年份 = ? AND 累计人数 <= ? AND 类型 = '综合分'
-            ORDER BY 累计人数 DESC
-            LIMIT 1
-            """
-        elif category == "音乐类":
-            table_name = "yinyuefenshuduan"
-            query = f"""
-            SELECT 分数
-            FROM {table_name}
-            WHERE 年份 =? AND 累计人数 <=? AND 类型 = '综合分'
-            ORDER BY 累计人数 DESC
-            LIMIT 1
-            """
+        
+        try:
+            rank = int(rank)
+            year = int(year)
+        except (ValueError, TypeError):
+            self.log.error(f"rank_to_score 参数类型错误: rank={rank}, year={year}")
+            return -1
+            
+        valid_categories = ["普通类", "美术类", "音乐类", "体育类", "书法类"]
+        if category not in valid_categories:
+            self.log.error(f"rank_to_score 类别参数错误: category={category}")
+            return -1
+        
+        # 使用字典映射表替代多个if-elif分支
+        table_mapping = {
+            "普通类": "putongfenshuduan",
+            "美术类": "meishufenshuduan",
+            "音乐类": "yinyuefenshuduan",
+            "体育类": "tiyufenshuduan",
+            "书法类": "shufafenshuduan"
+        }
+        
+        table_name = table_mapping.get(category)
+        
+        # 构建查询语句
+        query = f"SELECT 分数 FROM {table_name} WHERE 年份 = ? AND 累计人数 <= ?"
+        
+        # 对于艺术类专业，添加类型条件
+        if category in ["美术类", "音乐类"]:
+            query += " AND 类型 = '综合分'"
+        
+        query += " ORDER BY 累计人数 DESC LIMIT 1"
+        
         with self as app:
             app.__cursor__.execute(query, (year, rank))
             result = app.__cursor__.fetchone()
-        if result:
-            return result[0]
-        else:
-            return -1
+        
+        return result[0] if result else -1
 
+    @lru_cache(maxsize=128)
     def score_to_rank(self, score, category, year):
         """
-        专业分数转排名
+        专业分数转排名 (带缓存)
         :param score: 专业分数
         :param category: 专业类别
         :param year: 年份
         :return: 排名
         """
-        if score == "" or category == "" or year == "":
+        # 类型检查和数据验证
+        if not score or not category or not year:
             return -1
-        if category == "普通类":
-            table_name = "putongfenshuduan"
-            query = f"""
-            SELECT 累计人数
-            FROM {table_name}
-            WHERE 年份 =? AND 分数 <=?
-            ORDER BY 分数 DESC
-            LIMIT 1
-            """
-        elif category == "美术类":
-            table_name = "meishufenshuduan"
-            query = f"""
-            SELECT 累计人数
-            FROM {table_name}
-            WHERE 年份 =? AND 分数 <=? AND 类型 = '综合分'
-            ORDER BY 分数 DESC
-            LIMIT 1
-            """
-        elif category == "音乐类":
-            table_name = "yinyuefenshuduan"
-            query = f"""
-            SELECT 累计人数
-            FROM {table_name}
-            WHERE 年份 =? AND 分数 <=? AND 类型 = '综合分'
-            ORDER BY 分数 DESC
-            LIMIT 1
-            """
-        elif category == "体育类":
-            table_name = "tiyufenshuduan"
-            query = f"""
-            SELECT 累计人数
-            FROM {table_name}
-            WHERE 年份 =? AND 分数 <=?
-            ORDER BY 分数 DESC
-            LIMIT 1
-            """
-        elif category == "书法类":
-            table_name = "shufafenshuduan"
-            query = f"""
-            SELECT 累计人数
-            FROM {table_name}
-            WHERE 年份 =? AND 分数 <=?
-            ORDER BY 分数 DESC
-            LIMIT 1
-            """
+        
+        try:
+            score = float(score)
+            year = int(year)
+        except (ValueError, TypeError):
+            self.log.error(f"score_to_rank 参数类型错误: score={score}, year={year}")
+            return -1
+                
+        valid_categories = ["普通类", "美术类", "音乐类", "体育类", "书法类"]
+        if category not in valid_categories:
+            self.log.error(f"score_to_rank 类别参数错误: category={category}")
+            return -1
+        
+        # 使用字典映射表替代多个if-elif分支
+        table_mapping = {
+            "普通类": "putongfenshuduan",
+            "美术类": "meishufenshuduan",
+            "音乐类": "yinyuefenshuduan",
+            "体育类": "tiyufenshuduan",
+            "书法类": "shufafenshuduan"
+        }
+        
+        table_name = table_mapping.get(category)
+        
+        # 构建查询语句
+        query = f"SELECT 累计人数 FROM {table_name} WHERE 年份 = ? AND 分数 <= ?"
+        
+        # 对于艺术类专业，添加类型条件
+        if category in ["美术类", "音乐类"]:
+            query += " AND 类型 = '综合分'"
+        
+        query += " ORDER BY 分数 DESC LIMIT 1"
+        
         with self as app:
             app.__cursor__.execute(query, (year, score))
             result = app.__cursor__.fetchone()
-        if result:
-            return result[0]
-        else:
-            return -1
+        
+        return result[0] if result else -1
 
-    def toudang(self, category, zy, year="", yx="", rank=10, level="本科", counts=30):
+    def toudang(self, category, zy, year="", yx="", rank=0, level="本科", counts=30):
         """
-        查询专业
-        :param zy: 专业
-        :return: 专业
+        查询投档情况
+        
+        Args:
+            category: 类别，如"普通类"、"美术类"等
+            zy: 专业名称
+            year: 年份
+            yx: 院校名称
+            rank: 位次
+            level: 层次，如"本科"、"专科"等
+            counts: 返回结果数量，-1表示返回全部
+            
+        Returns:
+            pandas.DataFrame: 投档结果数据框
         """
+        # 参数验证
+        if not category:
+            self.log.error("toudang 缺少必要参数: category")
+            return pd.DataFrame()
+        
+        # 使用字典映射表替代多个if-elif分支
+        table_mapping = {
+            "普通类": "putongtoudang",
+            "美术类": "meishutoudang",
+            "音乐类": "yinyuetoudang",
+            "体育类": "tiyutoudang",
+            "书法类": "shufatoudang"
+        }
+        
+        table_name = table_mapping.get(category)
+        if not table_name:
+            self.log.error(f"toudang 类别参数错误: category={category}")
+            return pd.DataFrame()
+        
+        # 构建查询条件
         conditions = []
         params = []
-        table_name = ""
+        
+        # 添加各种查询条件
         if zy:
             conditions.append("专业 LIKE ?")
             params.append(f"%{zy}%")
@@ -232,403 +263,290 @@ class Application:
         if year:
             conditions.append("年份 = ?")
             params.append(year)
-        if category:
-            conditions.append("类型 =?")
-            params.append(category)
-            if category == "美术类":
-                table_name = "meishutoudang"
-            elif category == "普通类":
-                table_name = "putongtoudang"
-            elif category == "音乐类":
-                table_name = "yinyuetoudang"
-            elif category == "体育类":
-                table_name = "tiyutoudang"
-            elif category == "书法类":
-                table_name = "shufatoudang"
+        
+        conditions.append("类型 = ?")
+        params.append(category)
+        
+        # 处理位次/分数条件
         if rank:
-            if category == "美术类":
-                score = self.rank_to_score(rank, "美术类", year)
-            elif category == "音乐类":
-                score = self.rank_to_score(rank, "音乐类", year)
-            elif category == "体育类":
-                score = self.rank_to_score(rank, "体育类", year)
-            elif category == "书法类":
-                score = self.rank_to_score(rank, "书法类", year)
             if category == "普通类":
-                conditions.append("最低位次 <=?")
+                conditions.append("最低位次 <= ?")
                 params.append(rank)
             else:
-                conditions.append("最低位次 >=?")
-                params.append(score)
-        # if level:
-        #     conditions.append("层次 = ?")
-        #     params.append(level)
-        where_clause = " AND ".join(conditions)
+                # 获取对应分数
+                score_categories = ["美术类", "音乐类", "体育类", "书法类"]
+                if category in score_categories:
+                    score = self.rank_to_score(rank, category, year)
+                    conditions.append("最低位次 >= ?")
+                    params.append(score)
+        
+        # 构建SQL查询
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
         sql = f"SELECT * FROM {table_name} WHERE {where_clause}"
-        # print(sql)
-        # print(params)
+        
+        # 执行查询
         with self as app:
             app.__cursor__.execute(sql, params)
             results = app.__cursor__.fetchall()
+        
         if not results:
             return pd.DataFrame()
+        
+        # 处理查询结果
+        columns = [
+            "类型", "年份", "批次", "层次", "专业", "院校", "计划数", 
+            "最低分数" if category != "普通类" else "最低位次", "院校代码"
+        ]
+        
+        df = pd.DataFrame(results, columns=columns)
+        
+        # 根据类别处理数据
         if category != "普通类":
-            df = pd.DataFrame(
-                results,
-                columns=[
-                    "类型",
-                    "年份",
-                    "批次",
-                    "层次",
-                    "专业",
-                    "院校",
-                    "计划数",
-                    "最低分数",
-                    "院校代码",
-                ],
-            )
-            df["最低分数"] = pd.to_numeric(df["最低分数"], errors="coerce").astype(
-                float
-            )
-            df.sort_values(by="最低分数", ascending=True, inplace=True)
+            # 非普通类处理
+            df["最低分数"] = pd.to_numeric(df["最低分数"], errors="coerce").astype(float)
             df["位次"] = df.apply(
-                lambda row: self.score_to_rank(
-                    row["最低分数"], row["类型"], row["年份"]
-                ),
-                axis=1,
+                lambda row: self.score_to_rank(row["最低分数"], row["类型"], row["年份"]),
+                axis=1
             )
-        elif category == "普通类":
-            df = pd.DataFrame(
-                results,
-                columns=[
-                    "类型",
-                    "年份",
-                    "批次",
-                    "层次",
-                    "专业",
-                    "院校",
-                    "计划数",
-                    "最低位次",
-                    "院校代码",
-                ],
+            df.sort_values(by=['年份', '位次'], ascending=False, inplace=True)
+            
+            # 设置列顺序
+            new_order = [
+                "类型", "年份", "批次", "院校代码", "院校", "专业", 
+                "计划数", "最低分数", "位次", "层次"
+            ]
+            
+            # 添加当年分数
+            df[f"{self.year}分数(同位次)"] = df.apply(
+                lambda row: self.rank_to_score(row["位次"], row["类型"], self.year),
+                axis=1
             )
+        else:
+            # 普通类处理
             df["最低位次"] = pd.to_numeric(df["最低位次"], errors="coerce").astype(int)
-            df.sort_values(by="最低位次", ascending=False, inplace=True)
             df["分数"] = df.apply(
-                lambda row: self.rank_to_score(
-                    row["最低位次"], row["类型"], row["年份"]
-                ),
-                axis=1,
+                lambda row: self.rank_to_score(row["最低位次"], row["类型"], row["年份"]),
+                axis=1
             )
+            df.sort_values(by=['年份','分数'], ascending=False, inplace=True)
+            # 设置列顺序
+            new_order = [
+                "类型", "年份", "批次", "院校代码", "院校", "专业", 
+                "计划数", "最低位次", "分数", "层次", "选科要求", "学费", f"{self.year}计划数", f"{self.year}分数(同位次)"
+            ]
+            # 添加额外信息
+            df["选科要求"] = df.apply(
+                lambda row: self.get_xk(row["专业"][2:] if isinstance(row["专业"], str) else "", row["院校"]),
+                axis=1
+            )
+            df[f"{self.year}计划数"] = df.apply(
+                lambda row: self.get_jh(row["专业"][2:] if isinstance(row["专业"], str) else "", row["院校"]),
+                axis=1
+            )
+            df["学费"] = df.apply(
+                lambda row: self.get_xf(row["专业"][2:] if isinstance(row["专业"], str) else "", row["院校"]),
+                axis=1
+            )
+            df[f"{self.year}分数(同位次)"] = df.apply(
+                lambda row: self.rank_to_score(row["最低位次"], row["类型"], self.year),
+                axis=1
+            )
+        
+        # 处理结果数量限制
         if counts != -1:
             data = df[:counts].reset_index(drop=True)
         else:
             data = df.reset_index(drop=True)
+        
+        # 调整索引和列顺序
         data.index += 1
-        if category != "普通类":
-            new_order = [
-                "类型",
-                "年份",
-                "批次",
-                "院校代码",
-                "院校",
-                "专业",
-                "计划数",
-                "最低分数",
-                "位次",
-                "层次",
-            ]
-        else:
-            new_order = [
-                "类型",
-                "年份",
-                "批次",
-                "院校代码",
-                "院校",
-                "专业",
-                "计划数",
-                "最低位次",
-                "分数",
-                "层次",
-            ]
         data = data[new_order]
         data = data.drop(columns=["层次"])
-
-        if category != "普通类":
-            data[f"{self.year}分数(同位次)"] = data.apply(
-                lambda row: self.rank_to_score(row["位次"], row["类型"], self.year),
-                axis=1,
-            )
-        else:
-            data["选科要求"] = data.apply(
-                lambda row: self.get_xk(
-                    row["专业"][2:],
-                    row["院校"],
-                ),
-                axis=1,
-            )
-            data[f"{self.year}计划数"] = data.apply(
-                lambda row: self.get_jh(
-                    row["专业"][2:],
-                    row["院校"],
-                ),
-                axis=1,
-            )
-            data["学费"] = data.apply(
-                lambda row: self.get_xf(
-                    row["专业"][2:],
-                    row["院校"],
-                ),
-                axis=1,
-            )
-            data[f"{self.year}分数(同位次)"] = data.apply(
-                lambda row: self.rank_to_score(row["最低位次"], row["类型"], self.year),
-                axis=1,
-            )
+        
         return data
 
-    def get_jh(self, zy, yx, year=""):
+    def _get_jihua_info(self, zy, yx, column, year=""):
+        """获取计划信息的通用方法"""
         if not zy or not yx:
             return None
         if not year:
             year = self.year
 
-        # 使用参数化查询避免 SQL 注入
-        sql = "SELECT 计划数 FROM jihua WHERE 院校名称=? AND 年份=? AND 专业名称 LIKE ?"
+        sql = f"SELECT {column} FROM jihua WHERE 院校名称=? AND 年份=? AND 专业名称 LIKE ?"
         params = (yx, year, f"{zy}%")
 
         try:
             with self as app:
                 app.__cursor__.execute(sql, params)
                 result = app.__cursor__.fetchone()
-            if result:
-                return result[0]
-            else:
-                return None
+            return result[0] if result else None
         except Exception as e:
-            # 记录异常信息，可以使用日志模块
-            print(f"Error occurred: {e}")
+            self.log.error(f"获取{column}时出错: {e}")
             return None
+
+    def get_jh(self, zy, yx, year=""):
+        return self._get_jihua_info(zy, yx, "计划数", year)
 
     def get_xk(self, zy, yx, year=""):
-        if not zy or not yx:
-            return None
-        if not year:
-            year = self.year
-
-        # 使用参数化查询避免 SQL 注入
-        sql = (
-            "SELECT 选科要求 FROM jihua WHERE 院校名称=? AND 年份=? AND 专业名称 LIKE ?"
-        )
-        params = (yx, year, f"{zy}%")
-
-        try:
-            with self as app:
-                app.__cursor__.execute(sql, params)
-                result = app.__cursor__.fetchone()
-            if result:
-                return result[0]
-            else:
-                return None
-        except Exception as e:
-            # 记录异常信息，可以使用日志模块
-            print(f"Error occurred: {e}")
-            return None
+        return self._get_jihua_info(zy, yx, "选科要求", year)
 
     def get_xf(self, zy, yx, year=""):
-        if not zy or not yx:
-            return None
-        if not year:
-            year = self.year
-
-        # 使用参数化查询避免 SQL 注入
-        sql = "SELECT 学费 FROM jihua WHERE 院校名称=? AND 年份=? AND 专业名称 LIKE ?"
-        params = (yx, year, f"{zy}%")
-
-        try:
-            with self as app:
-                app.__cursor__.execute(sql, params)
-                result = app.__cursor__.fetchone()
-            if result:
-                return result[0]
-            else:
-                return None
-        except Exception as e:
-            # 记录异常信息，可以使用日志模块
-            print(f"Error occurred: {e}")
-            return None
+        return self._get_jihua_info(zy, yx, "学费", year)
 
     def toudang_range(self, category, year, min_rank, max_rank):
-        conditions = []
-        params = []
-        table_name = ""
-        if category:
-            conditions.append("类型 =?")
-            params.append(category)
-            if category == "美术类":
-                table_name = "meishutoudang"
-            elif category == "普通类":
-                table_name = "putongtoudang"
-            elif category == "音乐类":
-                table_name = "yinyuetoudang"
-            elif category == "体育类":
-                table_name = "tiyutoudang"
-            elif category == "书法类":
-                table_name = "shufatoudang"
+        """根据类别、年份和位次范围查询投档情况
+        
+        Args:
+            category: 类别，如"普通类"、"美术类"等
+            year: 年份
+            min_rank: 最小位次
+            max_rank: 最大位次
+            
+        Returns:
+            pandas.DataFrame: 投档结果数据框
+        """
+        # 参数验证
+        if not category:
+            self.log.error("toudang_range 缺少必要参数: category")
+            return pd.DataFrame()
+            
+        # 使用字典映射表替代多个if-elif分支
+        table_mapping = {
+            "普通类": "putongtoudang",
+            "美术类": "meishutoudang",
+            "音乐类": "yinyuetoudang",
+            "体育类": "tiyutoudang",
+            "书法类": "shufatoudang"
+        }
+        
+        table_name = table_mapping.get(category)
+        if not table_name:
+            self.log.error(f"toudang_range 类别参数错误: category={category}")
+            return pd.DataFrame()
+        
+        # 构建查询条件
+        conditions = ["类型 =?"]
+        params = [category]
+        
+        # 处理位次范围条件
+        is_normal = category == "普通类"
+        
         if min_rank:
-            if category == "美术类":
-                score = self.rank_to_score(min_rank, "美术类", year)
-            elif category == "音乐类":
-                score = self.rank_to_score(min_rank, "音乐类", year)
-            elif category == "体育类":
-                score = self.rank_to_score(min_rank, "体育类", year)
-            elif category == "书法类":
-                score = self.rank_to_score(min_rank, "书法类", year)
-            if category == "普通类":
+            # 普通类和其他类别的条件不同
+            if is_normal:
                 conditions.append("最低位次 >=?")
                 params.append(min_rank)
             else:
+                # 对于艺术类，将位次转换为分数
+                score = self.rank_to_score(min_rank, category, year)
                 conditions.append("最低位次 <=?")
                 params.append(score)
+                
         if max_rank:
-            if category == "美术类":
-                score = self.rank_to_score(max_rank, "美术类", year)
-            elif category == "音乐类":
-                score = self.rank_to_score(max_rank, "音乐类", year)
-            elif category == "体育类":
-                score = self.rank_to_score(max_rank, "体育类", year)
-            elif category == "书法类":
-                score = self.rank_to_score(max_rank, "书法类", year)
-            if category == "普通类":
+            # 普通类和其他类别的条件不同
+            if is_normal:
                 conditions.append("最低位次 <=?")
                 params.append(max_rank)
             else:
+                # 对于艺术类，将位次转换为分数
+                score = self.rank_to_score(max_rank, category, year)
                 conditions.append("最低位次 >=?")
                 params.append(score)
+                
         if year:
             conditions.append("年份 =?")
             params.append(year)
+            
+        # 构建SQL查询
         where_clause = " AND ".join(conditions)
         sql = f"SELECT * FROM {table_name} WHERE {where_clause}"
-        # print(sql)
-        # print(params)
+        
+        # 执行查询
         with self as app:
             app.__cursor__.execute(sql, params)
             results = app.__cursor__.fetchall()
+            
         if not results:
             return pd.DataFrame()
-        if category != "普通类":
-            df = pd.DataFrame(
-                results,
-                columns=[
-                    "类型",
-                    "年份",
-                    "批次",
-                    "层次",
-                    "专业",
-                    "院校",
-                    "计划数",
-                    "最低分数",
-                    "院校代码",
-                ],
-            )
-            df["最低分数"] = pd.to_numeric(df["最低分数"], errors="coerce").astype(
-                float
-            )
-            df.sort_values(by="最低分数", ascending=True, inplace=True)
-            df["位次"] = df.apply(
-                lambda row: self.score_to_rank(
-                    row["最低分数"], row["类型"], row["年份"]
-                ),
-                axis=1,
-            )
-        elif category == "普通类":
-            df = pd.DataFrame(
-                results,
-                columns=[
-                    "类型",
-                    "年份",
-                    "批次",
-                    "层次",
-                    "专业",
-                    "院校",
-                    "计划数",
-                    "最低位次",
-                    "院校代码",
-                ],
-            )
+            
+        # 根据类别处理数据
+        if is_normal:
+            # 普通类处理
+            columns = [
+                "类型", "年份", "批次", "层次", "专业", "院校", 
+                "计划数", "最低位次", "院校代码"
+            ]
+            df = pd.DataFrame(results, columns=columns)
             df["最低位次"] = pd.to_numeric(df["最低位次"], errors="coerce").astype(int)
-            df.sort_values(by="最低位次", ascending=False, inplace=True)
             df["分数"] = df.apply(
-                lambda row: self.rank_to_score(
-                    row["最低位次"], row["类型"], row["年份"]
-                ),
-                axis=1,
+                lambda row: self.rank_to_score(row["最低位次"], row["类型"], row["年份"]),
+                axis=1
             )
+            df.sort_values(by=["年份", "最低位次"], ascending=[True, False], inplace=True)
+            
+            # 设置列顺序
+            new_order = [
+                "类型", "年份", "批次", "院校代码", "院校", "专业", 
+                "计划数", "最低位次", "分数", "层次"
+            ]
+        else:
+            # 非普通类处理
+            columns = [
+                "类型", "年份", "批次", "层次", "专业", "院校", 
+                "计划数", "最低分数", "院校代码"
+            ]
+            df = pd.DataFrame(results, columns=columns)
+            df["最低分数"] = pd.to_numeric(df["最低分数"], errors="coerce").astype(float)
+            df["位次"] = df.apply(
+                lambda row: self.score_to_rank(row["最低分数"], row["类型"], row["年份"]),
+                axis=1
+            )
+            df.sort_values(by=["年份", "位次"], ascending=[True, True], inplace=True)
+            
+            # 设置列顺序
+            new_order = [
+                "类型", "年份", "批次", "院校代码", "院校", "专业", 
+                "计划数", "最低分数", "位次", "层次"
+            ]
+        
+        # 处理数据
         data = df.reset_index(drop=True)
         data.index += 1
-        if category != "普通类":
-            new_order = [
-                "类型",
-                "年份",
-                "批次",
-                "院校代码",
-                "院校",
-                "专业",
-                "计划数",
-                "最低分数",
-                "位次",
-                "层次",
-            ]
-        else:
-            new_order = [
-                "类型",
-                "年份",
-                "批次",
-                "院校代码",
-                "院校",
-                "专业",
-                "计划数",
-                "最低位次",
-                "分数",
-                "层次",
-            ]
         data = data[new_order]
         data = data.drop(columns=["层次"])
-
-        if category != "普通类":
-            data[f"{self.year}分数(同位次)"] = data.apply(
-                lambda row: self.rank_to_score(row["位次"], row["类型"], self.year),
-                axis=1,
-            )
-        else:
-            # data = data.reset_index(drop=True)
-            # data.index += 1
+        
+        # 添加额外信息
+        if is_normal:
+            # 添加普通类特有的额外信息
             data["选科要求"] = data.apply(
                 lambda row: self.get_xk(
                     row.专业[2:] if isinstance(row.专业, str) else str(row.专业)[2:],
-                    row.院校,
+                    row.院校
                 ),
-                axis=1,
+                axis=1
             )
             data[f"{self.year}计划数"] = data.apply(
                 lambda row: self.get_jh(
                     row.专业[2:] if isinstance(row.专业, str) else str(row.专业)[2:],
-                    row.院校,
+                    row.院校
                 ),
-                axis=1,
+                axis=1
             )
             data["学费"] = data.apply(
                 lambda row: self.get_xf(
                     row.专业[2:] if isinstance(row.专业, str) else str(row.专业)[2:],
-                    row.院校,
+                    row.院校
                 ),
-                axis=1,
+                axis=1
             )
-            data[f"{self.year}分数(同位次)"] = data.apply(
-                lambda row: self.rank_to_score(row["最低位次"], row["类型"], self.year),
-                axis=1,
-            )
+        
+        # 添加所有类别都需要的当年分数信息
+        score_column = "位次" if not is_normal else "最低位次"
+        data[f"{self.year}分数(同位次)"] = data.apply(
+            lambda row: self.rank_to_score(row[score_column], row["类型"], self.year),
+            axis=1
+        )
+        
         return data
 
 
@@ -636,7 +554,9 @@ def df_to_png(df, png_name, title):
     """
     将DataFrame转换为PNG图片
     :param df: DataFrame
-    :return: PNG图片
+    :param png_name: 图片文件名
+    :param title: 图片标题
+    :return: PNG图片路径
     """
     if df.empty:
         return None
@@ -686,47 +606,53 @@ async def rank_template(record):
 
 
 async def zy_toudang(record=None):
-    app = Application()
-    text = (
-        record.content.replace(" ", "")
-        .replace("：", ":")
-        .replace("不能为空", "")
-        .replace("可以为空", "")
-        .split("\n")
-    )
-    # print(text)
-    if len(text) != 7:
-        send_text("查询参数有误，请参照下面的模板重新输入！", record.roomid)
-        tips = "<专业投档>\n类别:美术类\n专业:不能为空\n年份:2024\n院校:可以为空\n位次:1000\n层次:本科"
-        send_text(tips, record.roomid)
-        send_text(
-            "建议认真阅读《小助手志愿填报辅助功能使用说明！》\nhttps://mp.weixin.qq.com/s/O1BymUcRUh-0-tE5YsPXGA",
-            record.roomid,
+    try:
+        app = Application()
+        text = (
+            record.content.replace(" ", "")
+            .replace("：", ":")
+            .replace("不能为空", "")
+            .replace("可以为空", "")
+            .split("\n")
         )
-        return None
-    zy = text[2].split(":")[-1]
-    if zy:
-        tips = app.query_zy(zy)
-        if len(tips.split("\n")) > 10:
-            tip = tips.split("\n")[10]
-            tip = f"{zy}\n{tip}"
-            send_text(tip, record.roomid)
-    df = app.toudang(
-        text[1].split(":")[-1],
-        text[2].split(":")[-1],
-        text[3].split(":")[-1],
-        text[4].split(":")[-1],
-        text[5].split(":")[-1],
-        text[6].split(":")[-1],
-    )
-    png_name = record.roomid + ".png"
-    title = f"{text[3].split(':')[-1]} {text[4].split(':')[-1]}{text[1].split(':')[-1]}{text[2].split(':')[-1]}投档情况"
-    png = df_to_png(df, png_name, title)
-    if png:
-        send_image(png, record.roomid)
-        return 0
-    else:
-        send_text("查询结果为空，请重新输入！", record.roomid)
+        # print(text)
+        if len(text) != 7:
+            send_text("查询参数有误，请参照下面的模板重新输入！", record.roomid)
+            tips = "<专业投档>\n类别:美术类\n专业:不能为空\n年份:2024\n院校:可以为空\n位次:1000\n层次:本科"
+            send_text(tips, record.roomid)
+            send_text(
+                "建议认真阅读《小助手志愿填报辅助功能使用说明！》\nhttps://mp.weixin.qq.com/s/O1BymUcRUh-0-tE5YsPXGA",
+                record.roomid,
+            )
+            return None
+        zy = text[2].split(":")[-1]
+        if zy:
+            tips = app.query_zy(zy)
+            if len(tips.split("\n")) > 10:
+                tip = tips.split("\n")[10]
+                tip = f"{zy}\n{tip}"
+                send_text(tip, record.roomid)
+        df = app.toudang(
+            text[1].split(":")[-1],
+            text[2].split(":")[-1],
+            text[3].split(":")[-1],
+            text[4].split(":")[-1],
+            text[5].split(":")[-1],
+            text[6].split(":")[-1],
+        )
+        png_name = record.roomid + ".png"
+        title = f"{text[3].split(':')[-1]} {text[4].split(':')[-1]}{text[1].split(':')[-1]}{text[2].split(':')[-1]}投档情况"
+        png = df_to_png(df, png_name, title)
+        if png:
+            send_image(png, record.roomid)
+            return 0
+        else:
+            send_text("查询结果为空，请重新输入！", record.roomid)
+            return -1
+    except Exception as e:
+        log = LogConfig().get_logger()
+        log.error(f"zy_toudang 执行出错: {e}")
+        send_text("查询过程中出现错误，请稍后重试", record.roomid)
         return -1
 
 
@@ -822,6 +748,18 @@ from PIL import Image, ImageDraw, ImageFont
 def add_watermark(
     image_path, output_path, watermark_text, font_path, font_size, opacity, step
 ):
+    """
+    给图片添加水印
+    
+    Args:
+        image_path: 原图片路径
+        output_path: 输出图片路径
+        watermark_text: 水印文字
+        font_path: 字体路径
+        font_size: 字体大小
+        opacity: 透明度
+        step: 水印间隔
+    """
     # 打开图片
     image = Image.open(image_path).convert("RGBA")
     width, height = image.size
@@ -1246,6 +1184,16 @@ def get_gradient_level(rank, intervals):
 
 
 def check_xk(xk, xkyq):
+    """
+    检查选科要求是否符合
+    
+    Args:
+        xk: 考生选科
+        xkyq: 专业选科要求
+        
+    Returns:
+        bool: 是否符合选科要求
+    """
     if xk == "":
         return True
     if xkyq == "" or xkyq == "不限" or not xkyq:
