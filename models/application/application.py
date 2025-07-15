@@ -18,12 +18,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import matplotlib
-
 # 设置 Matplotlib 的字体为支持中文的字体
 matplotlib.rcParams["font.sans-serif"] = ["SimHei"]  # 指定默认字体为黑体
 matplotlib.rcParams["axes.unicode_minus"] = False  # 用来正常显示负号
+
 config = Config()
 lesson_dir = config.get_config("lesson_dir")
+admin_list = Config().get_config("admin_list")
 
 
 class Application:
@@ -895,13 +896,13 @@ def calculate_gradient_intervals(
     elif category == "书法类类":
         total_candidates = 2500
 
+    # 计算考生位次百分比
+    rank_percent = rank / total_candidates
+    
     # 动态分段策略 - 基于考生总数
-    # 高分段: 前4%
-    # 中分段: 5%-30%
-    # 低分段: 30%以后
-    high_segment = int(total_candidates * 0.04)
-    medium_segment = int(total_candidates * 0.20)
-
+    high_segment = int(total_candidates * 0.05)
+    medium_segment = int(total_candidates * 0.30)
+    
     # 根据分段策略确定考生类型
     if rank <= high_segment:
         segment_type = "高分"
@@ -912,159 +913,129 @@ def calculate_gradient_intervals(
     else:
         segment_type = "低分"
         segment_desc = f"{medium_segment+1}名以后(30%以后)"
-
+    
+    # 梯度范围动态调整函数
+    def dynamic_range(base_factor, min_span_factor, max_span_factor, rank_span_factor=0.2):
+        """
+        动态梯度范围计算函数
+        base_factor: 基础范围系数
+        min_span_factor: 最小跨度系数
+        max_span_factor: 最大跨度系数
+        rank_span_factor: 位次跨度影响因子
+        """
+        # 基础范围
+        base_span = base_factor * rank
+        
+        # 位次百分比影响（高位次扩大范围，低位次缩小范围）
+        span_adjustment = 1 + (0.5 - rank_percent) * rank_span_factor
+        
+        # 总考生数影响（考生越多，合理范围越大）
+        total_adjustment = 1 + (total_candidates / 100000) * 0.1
+        
+        # 计算最终跨度
+        final_span = base_span * span_adjustment * total_adjustment
+        
+        # 应用最小和最大跨度限制
+        min_span = min_span_factor * total_candidates
+        max_span = max_span_factor * total_candidates
+        return max(min_span, min(max_span, final_span))
+    
     # 根据考生类型和分段确定策略系数
-    if category == "普通类":
-        if segment_type == "高分":  # 高分段考生
-            coefficients = {
-                "gamble": [0.75, 0.9],
-                "reach": [0.9, 0.97],
-                "match": [0.97, 1.03],
-                "safe": [1.03, 1.12],
-                "anchor": [1.12, 1.25],
-            }
-        elif segment_type == "中分":  # 中分段考生
-            coefficients = {
-                "gamble": [0.7, 0.9],
-                "reach": [0.9, 0.98],
-                "match": [0.98, 1.05],
-                "safe": [1.05, 1.15],
-                "anchor": [1.15, 1.3],
-            }
-        else:  # 低分段考生
-            coefficients = {
-                "gamble": [0.65, 0.85],
-                "reach": [0.85, 0.97],
-                "match": [0.97, 1.08],
-                "safe": [1.08, 1.2],
-                "anchor": [1.2, 1.5],
-            }
-
+    if category == '普通类':
+        # 普通类梯度范围系数
+        gamble_span = dynamic_range(0.15, 0.001, 0.05)
+        reach_span = dynamic_range(0.08, 0.001, 0.04)
+        match_span = dynamic_range(0.07, 0.001, 0.03)
+        safe_span = dynamic_range(0.10, 0.001, 0.04)
+        anchor_span = dynamic_range(0.15, 0.005, 0.08)
+        
+        # 确保区间连续的计算
+        intervals = {
+            'gamble': (max(1, int(rank - gamble_span)), 0), 
+            'reach': (0, 0),  # 占位符
+            'match': (0, 0),  # 占位符
+            'safe': (0, 0),   # 占位符
+            'anchor': (0, 0)  # 占位符
+        }
+        
+        # 计算连续的区间
+        intervals['gamble'] = (max(1, int(rank - gamble_span)), int(rank - gamble_span * 0.6))
+        intervals['reach'] = (int(intervals['gamble'][1] + 1), int(rank - reach_span * 0.3))
+        intervals['match'] = (int(intervals['reach'][1] + 1), int(rank + match_span * 0.4))
+        intervals['safe'] = (int(intervals['match'][1] + 1), int(rank + safe_span * 0.7))
+        intervals['anchor'] = (int(intervals['safe'][1] + 1), int(rank + anchor_span))
         # 普通类志愿分配策略
         allocation = {
-            "激进": {
-                "gamble": 0.08,
-                "reach": 0.25,
-                "match": 0.30,
-                "safe": 0.25,
-                "anchor": 0.12,
-            },
-            "均衡": {
-                "gamble": 0.05,
-                "reach": 0.20,
-                "match": 0.35,
-                "safe": 0.25,
-                "anchor": 0.15,
-            },
-            "保守": {
-                "gamble": 0.03,
-                "reach": 0.15,
-                "match": 0.40,
-                "safe": 0.25,
-                "anchor": 0.17,
-            },
+            '激进': {'gamble': 0.08, 'reach': 0.25, 'match': 0.30, 'safe': 0.25, 'anchor': 0.12},
+            '均衡':   {'gamble': 0.05, 'reach': 0.20, 'match': 0.35, 'safe': 0.25, 'anchor': 0.15},
+            '保守': {'gamble': 0.03, 'reach': 0.15, 'match': 0.40, 'safe': 0.25, 'anchor': 0.17}
         }
-
+        
     else:  # 艺术类
-        # 艺术类分段调整 (竞争更集中)
-        art_high_segment = int(total_candidates * 0.10)  # 前10%
-        art_medium_segment = int(total_candidates * 0.50)  # 前50%
-
-        if rank <= art_high_segment:
-            segment_type = "高分"
-            segment_desc = f"前{art_high_segment}名(前10%)"
-        elif rank <= art_medium_segment:
-            segment_type = "中分"
-            segment_desc = f"{art_high_segment+1}-{art_medium_segment}名(10%-50%)"
-        else:
-            segment_type = "低分"
-            segment_desc = f"{art_medium_segment+1}名以后(50%以后)"
-
-        if segment_type == "高分":  # 艺术类高分段
-            coefficients = {
-                "gamble": [0.7, 0.85],
-                "reach": [0.85, 0.95],
-                "match": [0.95, 1.05],
-                "safe": [1.05, 1.15],
-                "anchor": [1.15, 1.35],
-            }
-        elif segment_type == "中分":  # 艺术类中分段
-            coefficients = {
-                "gamble": [0.65, 0.8],
-                "reach": [0.8, 0.93],
-                "match": [0.93, 1.08],
-                "safe": [1.08, 1.25],
-                "anchor": [1.25, 1.6],
-            }
-        else:  # 艺术类低分段
-            coefficients = {
-                "gamble": [0.6, 0.75],
-                "reach": [0.75, 0.9],
-                "match": [0.9, 1.1],
-                "safe": [1.1, 1.3],
-                "anchor": [1.3, 2.0],
-            }
+        # 艺术类梯度范围系数
+        gamble_span = dynamic_range(0.15, 0.001, 0.06)
+        reach_span = dynamic_range(0.10, 0.001, 0.05)
+        match_span = dynamic_range(0.08, 0.001, 0.04)
+        safe_span = dynamic_range(0.12, 0.001, 0.05)
+        anchor_span = dynamic_range(0.20, 0.005, 0.10)
+        
+        # 确保区间连续的计算
+        intervals = {
+            'gamble': (max(1, int(rank - gamble_span)), 0), 
+            'reach': (0, 0),  # 占位符
+            'match': (0, 0),  # 占位符
+            'safe': (0, 0),   # 占位符
+            'anchor': (0, 0)  # 占位符
+        }
+        
+        # 计算连续的区间
+        intervals['gamble'] = (max(1, int(rank - gamble_span)), int(rank - gamble_span * 0.5))
+        intervals['reach'] = (int(intervals['gamble'][1] + 1), int(rank - reach_span * 0.2))
+        intervals['match'] = (int(intervals['reach'][1] + 1), int(rank + match_span * 0.3))
+        intervals['safe'] = (int(intervals['match'][1] + 1), int(rank + safe_span * 0.6))
+        intervals['anchor'] = (int(intervals['safe'][1] + 1), int(rank + anchor_span))
 
         # 艺术类志愿分配策略(总志愿数60个)
         allocation = {
-            "激进": {
-                "gamble": 0.07,
-                "reach": 0.23,
-                "match": 0.35,
-                "safe": 0.25,
-                "anchor": 0.10,
-            },
-            "均衡": {
-                "gamble": 0.05,
-                "reach": 0.18,
-                "match": 0.40,
-                "safe": 0.25,
-                "anchor": 0.12,
-            },
-            "保守": {
-                "gamble": 0.03,
-                "reach": 0.12,
-                "match": 0.45,
-                "safe": 0.25,
-                "anchor": 0.15,
-            },
+            '激进': {'gamble': 0.07, 'reach': 0.23, 'match': 0.35, 'safe': 0.25, 'anchor': 0.10},
+            '均衡':   {'gamble': 0.05, 'reach': 0.18, 'match': 0.40, 'safe': 0.25, 'anchor': 0.12},
+            '保守': {'gamble': 0.03, 'reach': 0.12, 'match': 0.45, 'safe': 0.25, 'anchor': 0.15}
         }
-
-    # 计算各梯度的位次区间
-    intervals = {}
-    for level, coefs in coefficients.items():
-        min_rank = max(1, int(rank * coefs[0]))  # 位次不能小于1
-        max_rank = int(rank * coefs[1])
-        intervals[level] = (min_rank, max_rank - 1)
-
+    
+    # 确保区间合理性
+    for level, (min_r, max_r) in intervals.items():
+        if min_r < 1:
+            min_r = 1
+        if max_r > total_candidates:
+            max_r = total_candidates
+        if min_r > max_r:
+            min_r, max_r = max_r, min_r
+        intervals[level] = (min_r, max_r)
+    
     # 根据风险偏好分配志愿数量
     allocation_ratios = allocation[risk_preference]
-    counts = {
-        level: max(1, int(total_slots * ratio))
-        for level, ratio in allocation_ratios.items()
-    }
-
+    counts = {level: max(1, int(total_slots * ratio)) for level, ratio in allocation_ratios.items()}
+    
     # 确保总数正确
     total = sum(counts.values())
     if total != total_slots:
         # 调整match级的数量以补偿
-        counts["match"] += total_slots - total
-
+        counts['match'] += total_slots - total
+    
     # 动态调整因子说明
     adjustment_factors = {
-        "专业热度": {"热门": +0.05, "冷门": -0.03},
-        "地域": {"一线": +0.04, "三四线": -0.02},
-        "招生计划": {"扩招": -0.03, "缩招": +0.06},
+        '专业热度': {'热门': +0.05, '冷门': -0.03},
+        '地域': {'一线': +0.04, '三四线': -0.02},
+        '招生计划': {'扩招': -0.03, '缩招': +0.06}
     }
-
+    
     # 艺术类特殊调整
-    if category == "艺术类":
-        adjustment_factors["专业类型"] = {
-            "美术类": +0.02 if segment_type == "高分" else -0.01,
-            "音乐类": +0.01 if segment_type == "高分" else -0.02,
-            "舞蹈类": -0.03 if segment_type == "低分" else +0.01,
+    if category == '艺术类':
+        adjustment_factors['专业类型'] = {
+            '美术类': +0.02 if segment_type == "高分" else -0.01,
+            '音乐类': +0.01 if segment_type == "高分" else -0.02,
+            '舞蹈类': -0.03 if segment_type == "低分" else +0.01
         }
-
     # 初始化 tips 变量
     tips = ""
 
@@ -1131,78 +1102,145 @@ def calculate_gradient_intervals(
         print(tips)
 
     return {
-        "category": category,
-        "rank": rank,
-        "risk_preference": risk_preference,
-        "total_slots": total_slots,
-        "intervals": intervals,
-        "counts": counts,
-        "adjustment_factors": adjustment_factors,
+        'category': category,
+        'total_candidates': total_candidates,
+        'rank': rank,
+        'segment': segment_type,
+        'risk_preference': risk_preference,
+        'total_slots': total_slots,
+        'intervals': intervals,
+        'counts': counts,
+        'adjustment_factors': adjustment_factors
     }, tips
 
 
-def plot_gradient_strategy(result, png_name):
-    """可视化梯度策略"""
-    category = result["category"]
-    rank = result["rank"]
-    intervals = result["intervals"]
-    counts = result["counts"]
-    total_slots = result["total_slots"]
-
+def plot_gradient_strategy(result, png_name='intervals.png'):
+    """可视化梯度策略 - 优化X轴刻度和区间标签"""
+    category = result['category']
+    total_candidates = result['total_candidates']
+    rank = result['rank']
+    segment = result['segment']
+    intervals = result['intervals']
+    counts = result['counts']
+    total_slots = result['total_slots']
+    
     # 创建图形
-    plt.figure(figsize=(14, 10))
-
+    plt.figure(figsize=(14, 12))
+    
     # 位次区间图
     plt.subplot(2, 1, 1)
-    levels = ["gamble", "reach", "match", "safe", "anchor"]
-    labels = ["赌", "冲", "稳", "保", "垫"]
-    colors = ["#FF6B6B", "#FFD166", "#06D6A0", "#118AB2", "#073B4C"]
-
+    levels = ['gamble', 'reach', 'match', 'safe', 'anchor']
+    level_names = ['赌', '冲', '稳', '保', '垫']
+    colors = ['#FF6B6B', '#FFD166', '#06D6A0', '#118AB2', '#073B4C']
+    
+    # 确定X轴范围
+    min_rank = min([intervals[level][0] for level in levels])
+    max_rank = max([intervals[level][1] for level in levels])
+    
+    # 添加10%的边界缓冲
+    rank_span = max_rank - min_rank
+    x_min = max(1, int(min_rank - rank_span * 0.1))
+    x_max = min(total_candidates, int(max_rank + rank_span * 0.1))
+    
+    # 动态设置刻度间隔
+    if rank_span < 10000:  # 小范围
+        x_ticks = np.linspace(x_min, x_max, num=10, dtype=int)
+    elif rank_span < 100000:  # 中等范围
+        step = max(1000, int(rank_span / 15))  # 至少1000名间隔
+        x_ticks = np.arange(x_min, x_max + step, step)
+    else:  # 大范围
+        step = max(5000, int(rank_span / 20))  # 至少5000名间隔
+        x_ticks = np.arange(x_min, x_max + step, step)
+    
     # 绘制区间条
     for i, level in enumerate(levels):
         min_r, max_r = intervals[level]
-        plt.barh(
-            labels[i], max_r - min_r, left=min_r, color=colors[i], edgecolor="black"
-        )
-
+        bar_width = max_r - min_r
+        bar = plt.barh(level_names[i], bar_width, left=min_r, color=colors[i], 
+                       edgecolor='black', height=0.7)
+        
+        # 添加区间范围标签
+        label_x = min_r + bar_width / 2
+        label_text = f"{min_r:,}~{max_r:,}"
+        plt.text(label_x, i, label_text, ha='center', va='center', 
+                 fontsize=10, fontweight='bold', color='white')
+    
     # 标记考生位次
-    plt.axvline(x=rank, color="red", linestyle="--", linewidth=2)
-    plt.text(
-        rank,
-        4.7,
-        f"考生位次: {rank:,}",
-        color="red",
-        ha="center",
-        fontsize=12,
-        weight="bold",
-    )
-
-    plt.title(f"山东新高考{category}梯度策略 (考生位次: {rank:,}名)", fontsize=16)
-    plt.xlabel("位次", fontsize=12)
+    plt.axvline(x=rank, color='red', linestyle='--', linewidth=2)
+    plt.text(rank, 4.7, f'考生位次: {rank:,}', color='red', ha='center', 
+             fontsize=12, weight='bold', bbox=dict(facecolor='white', alpha=0.8))
+    
+    # 标记分段位置（仅当在可视范围内）
+    def add_segment_marker(segment_value, label):
+        if x_min <= segment_value <= x_max:
+            plt.axvline(x=segment_value, color='gray', linestyle=':', linewidth=1.5)
+            plt.text(segment_value, 0.2, label, color='gray', ha='center', 
+                     fontsize=9, bbox=dict(facecolor='white', alpha=0.7))
+    
+    if category == '普通类':
+        high_segment = int(total_candidates * 0.05)
+        medium_segment = int(total_candidates * 0.30)
+        add_segment_marker(high_segment, f'高分段边界\n({high_segment:,}名)')
+        add_segment_marker(medium_segment, f'中分段边界\n({medium_segment:,}名)')
+    else:
+        art_high_segment = int(total_candidates * 0.10)
+        art_medium_segment = int(total_candidates * 0.50)
+        add_segment_marker(art_high_segment, f'高分段边界\n({art_high_segment:,}名)')
+        add_segment_marker(art_medium_segment, f'中分段边界\n({art_medium_segment:,}名)')
+    
+    # 设置图表属性
+    plt.title(f'山东新高考{category}智能梯度策略\n(考生总数: {total_candidates:,}人 | 考生位次: {rank:,}名 | {segment}段)', 
+              fontsize=16, pad=20)
+    plt.xlabel('位次', fontsize=12)
     plt.gca().invert_yaxis()  # 反转Y轴使赌级在顶部
-    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{int(x):,}"))
-    plt.grid(axis="x", linestyle="--", alpha=0.7)
-
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{int(x):,}'))
+    plt.grid(axis='x', linestyle='--', alpha=0.7)
+    
+    # 设置X轴范围
+    plt.xlim(x_min, x_max)
+    plt.xticks(x_ticks, rotation=45)
+    
+    # 添加图例
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor=colors[0], label='赌'),
+        Patch(facecolor=colors[1], label='冲'),
+        Patch(facecolor=colors[2], label='稳'),
+        Patch(facecolor=colors[3], label='保'),
+        Patch(facecolor=colors[4], label='垫')
+    ]
+    plt.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1.02, 1.15), 
+               ncol=3, fontsize=10)
+    
     # 志愿数量分配饼图
     plt.subplot(2, 1, 2)
     sizes = [counts[level] for level in levels]
-    labels_with_count = [f"{label}级\n{size}个" for label, size in zip(labels, sizes)]
+    labels_with_count = [f'{name}级\n{size}个' for name, size in zip(level_names, sizes)]
     explode = (0.1, 0.05, 0, 0, 0)  # 突出赌级和冲级
-
-    plt.pie(
-        sizes,
-        explode=explode,
-        labels=labels_with_count,
-        colors=colors,
-        autopct="%1.1f%%",
-        shadow=True,
-        startangle=140,
-        textprops={"fontsize": 12},
-    )
-    plt.axis("equal")
-    plt.title(f"{total_slots}个志愿分配比例", fontsize=16)
-
-    plt.tight_layout()
+    
+    # 创建饼图
+    wedges, texts, autotexts = plt.pie(sizes, explode=explode, labels=labels_with_count, 
+                                       colors=colors, autopct='%1.1f%%', shadow=True, 
+                                       startangle=140, textprops={'fontsize': 11})
+    
+    # 设置饼图文本样式
+    for text in texts:
+        text.set_fontsize(10)
+    for autotext in autotexts:
+        autotext.set_fontsize(9)
+        autotext.set_color('white')
+    
+    plt.axis('equal')
+    plt.title(f'{total_slots}个志愿分配比例', fontsize=14, pad=15)
+    
+    # 添加策略说明
+    plt.figtext(0.5, 0.02, 
+                f"注: 实际填报时需考虑专业热度、地域因素和招生计划变化对位次的影响", 
+                ha="center", fontsize=10, color='#555555')
+    
+    plt.tight_layout(pad=3.0)
+    plt.subplots_adjust(bottom=0.1, top=0.9)
+    
     timestamp = str(int(time.time() * 1000))
     g = png_name.split(".")
     png_name = f"{g[0]}_{timestamp}.{g[1]}"
@@ -1329,5 +1367,17 @@ async def get_gradient_file(record=None):
     file_name = f"{category}_{year}_{risk_preference}_{rank}.xlsx"
     file_path = os.path.join(lesson_dir, "temp", file_name)
     df.to_excel(file_path, index=False)
-    time.sleep(2)
-    # send_file(os.path.join("temp", file_name), record.roomid)
+
+    timeout_seconds = 180
+    check_interval = 3  # 每秒检查一次
+    start_time = datetime.now()
+
+    while not os.path.exists(file_path):
+        elapsed = (datetime.now() - start_time).total_seconds()
+        if elapsed >= timeout_seconds:
+            send_text(f"{file_path}文件未在180秒内生成", admin_list[0])
+            raise TimeoutError(f"文件未在 {timeout_seconds} 秒内生成：{file_path}")
+        time.sleep(check_interval)
+
+    # 文件存在后发送
+    send_file(os.path.join("temp", file_name), record.roomid)
